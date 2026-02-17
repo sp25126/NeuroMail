@@ -103,15 +103,8 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-📖 For detailed setup instructions, see [SETUP.md](file:///c:/Users/saumy/OneDrive/Desktop/task/SETUP.md)
-
 ---
 
-## 📚 Documentation
-- [SETUP.md](file:///c:/Users/saumy/OneDrive/Desktop/task/SETUP.md) - Complete installation and configuration guide
-- [REPORT.md](file:///c:/Users/saumy/OneDrive/Desktop/task/report.md) - Technical architecture and implementation details
-
----
 
 ## 🛠 Tech Stack
 
@@ -307,16 +300,15 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ---
 
 ## 📧 Contact
-Built by: [Your Name]
-Portfolio: [your-portfolio.com](http://your-portfolio.com)
-LinkedIn: [linkedin.com/in/yourprofile](http://linkedin.com/in/yourprofile)
-Email: [your.email@example.com](mailto:your.email@example.com)
+Built by: Saumya Patel
+LinkedIn: www.linkedin.com/in/saumya-rajeshbhai-patel-857290372
+Email: saumyavishwam@gmail.com
 
 <div align="center">
 
 ⭐️ Star this repo if you find it useful!
 Built with ❤️ for Processity
 
-[Report Bug](https://github.com/yourusername/neuromail/issues) • [Request Feature](https://github.com/yourusername/neuromail/issues)
+[Report Bug](https://github.com/sp25126/neuromail/issues) • [Request Feature](https://github.com/sp25126/neuromail/issues)
 
 </div>
