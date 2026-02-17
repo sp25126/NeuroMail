@@ -10,7 +10,9 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 
-[Features](#-features) • [Demo]([#-demo](https://youtu.be/YtgE0G9F2fk?si=FEg9IUA6N159dNxW)) • [Installation](#-quick-start) • [Documentation](#-documentation) • [Tech Stack](#-tech-stack)
+DEMO - [VIDEO](https://youtu.be/YtgE0G9F2fk?si=FEg9IUA6N159dNxW)
+
+[Features](#-features) • [Demo]([#-demo]) • [Installation](#-quick-start) • [Documentation](#-documentation) • [Tech Stack](#-tech-stack)
 
 <img src="./public/screenshots/neuromail-hero.png" alt="Neuromail Interface" width="800" />
 
