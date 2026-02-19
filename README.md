@@ -10,7 +10,7 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 
-DEMO - [VIDEO](https://youtu.be/YtgE0G9F2fk?si=FEg9IUA6N159dNxW)
+DEMO - [VIDEO](https://youtu.be/6axLFUMPTMs)
 
 [Features](#-features) • [Demo]([#-demo]) • [Installation](#-quick-start) • [Documentation](#-documentation) • [Tech Stack](#-tech-stack)
 
