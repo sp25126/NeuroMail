@@ -29,14 +29,17 @@ export async function POST(req: NextRequest) {
         const stream = new ReadableStream({
             async start(controller) {
                 try {
-                    for await (const chunk of orchestrator.executeRequestStream({
-                        sessionId,
-                        userMessage: message,
-                        appState,
-                        currentThread,
-                        recentThreads,
+                    for await (const chunk of orchestrator.executeRequestStream(
                         llmConfig,
-                    })) {
+                        {
+                            sessionId,
+                            userMessage: message,
+                            appState,
+                            currentThread,
+                            recentThreads,
+                            llmConfig,
+                        }
+                    )) {
                         const data = `data: ${JSON.stringify(chunk)}\n\n`;
                         controller.enqueue(encoder.encode(data));
                     }

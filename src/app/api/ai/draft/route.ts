@@ -1,4 +1,4 @@
-import { generateLLMResponse, getLLMConfig } from "@/lib/llm"
+import { generateLLMResponse, getLLMConfig } from "@/agent/llm"
 import { getGmailClient } from "@/lib/gmail"
 import { handleApi } from "@/lib/api-handler"
 import { getPreferenceByEmail } from "@/lib/storage"
@@ -6,7 +6,7 @@ import { getPreferenceByEmail } from "@/lib/storage"
 export async function POST(req: Request) {
     return handleApi({ route: "POST /api/ai/draft", requireAuth: true }, async (ctx) => {
         const { prompt, context } = await req.json()
-        const llmConfig = getLLMConfig(ctx.userEmail);
+        const llmConfig = await getLLMConfig(ctx.userEmail);
 
         // Load user preferences
         const prefs = getPreferenceByEmail(ctx.userEmail);

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { LLMProvider } from './llm/types';
+import { LLMProvider } from '@/agent/llm/types';
 
 const STORAGE_PATH = path.join(process.cwd(), 'data', 'preferences.json');
 

@@ -1,4 +1,4 @@
-import { LLMConfig } from "../../types";
+import { LLMConfig } from "../types";
 import { createLogger } from "../../observability/logger";
 
 const logger = createLogger("LLMProvider");

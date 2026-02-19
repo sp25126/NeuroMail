@@ -1,5 +1,5 @@
 import { BaseLLMProvider, LLMMessage, LLMStreamChunk } from "./base";
-import { LLMConfig } from "../../types";
+import { LLMConfig } from "../types";
 
 export class OpenRouterProvider extends BaseLLMProvider {
     constructor(config: LLMConfig) {

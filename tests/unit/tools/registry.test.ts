@@ -165,7 +165,7 @@ describe("ToolRegistry", () => {
             };
 
             const request: ToolExecutionRequest = {
-                toolId: "context.reply_current",
+                toolId: "mail.reply",
                 arguments: {
                     body: "Thanks for the update!",
                 },
@@ -194,7 +194,7 @@ describe("ToolRegistry", () => {
             };
 
             const request: ToolExecutionRequest = {
-                toolId: "context.reply_current",
+                toolId: "mail.reply",
                 arguments: {
                     body: "Reply body",
                 },

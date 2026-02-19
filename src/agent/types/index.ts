@@ -156,7 +156,7 @@ export type MacroDefinition = z.infer<typeof MacroDefinitionSchema>;
 // ============================================================================
 
 export const LLMConfigSchema = z.object({
-    provider: z.enum(["ollama", "openai", "anthropic", "openrouter"]),
+    provider: z.enum(["ollama", "openai", "anthropic", "openrouter", "colab"]),
     model: z.string(),
     apiKey: z.string().optional(),
     baseUrl: z.string().optional(),

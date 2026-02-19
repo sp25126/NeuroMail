@@ -4,18 +4,23 @@ import { useState, useEffect } from "react"
 import { Bot, Sparkles, X, Send, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useMailStore } from "@/store/useMailStore"
+import { useSettingsStore } from "@/store/useSettingsStore"
 
 interface CopilotSidebarProps {
     isOpen: boolean
     onClose: () => void
     context?: string
-    providerName?: string
 }
 
 import { AssistantPanel, Message } from "@/components/assistant/AssistantPanel"
 import { v4 as uuidv4 } from "uuid"
 
-export function CopilotSidebar({ isOpen, onClose, providerName = "Local AI" }: CopilotSidebarProps) {
+export function CopilotSidebar({ isOpen, onClose }: CopilotSidebarProps) {
+    const { aiProvider } = useSettingsStore();
+    const providerDisplay = aiProvider === 'colab' ? 'Colab Brain' :
+        aiProvider === 'ollama' ? 'Local Ollama' :
+            aiProvider === 'openai' ? 'OpenAI' : 'Local AI';
+
     const [showSettings, setShowSettings] = useState(false);
     const [settings, setSettings] = useState({
         dataAccess: true,
@@ -34,7 +39,7 @@ export function CopilotSidebar({ isOpen, onClose, providerName = "Local AI" }: C
                         AI Copilot
                     </div>
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium pl-7">
-                        Running on {providerName}
+                        Running on {providerDisplay}
                     </div>
                 </div>
                 <div className="flex items-center gap-1">

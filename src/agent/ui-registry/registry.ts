@@ -1,6 +1,5 @@
 import { UIOperation, ComposedFunction } from "./types";
 import { createLogger } from "../observability/logger";
-import { db } from "@/lib/db";
 
 const logger = createLogger("UIRegistry");
 
@@ -343,52 +342,42 @@ export class UIComponentRegistry {
     }
 
     /**
-     * Load all composed functions from database
+     * Load all composed functions from database via API
      */
     async loadComposedFunctions(userId: string) {
         try {
-            const rows = await db.query(
-                "SELECT * FROM composed_functions WHERE user_id = ?",
-                [userId]
-            );
+            // Registry is used on client, so we must fetch via API
+            const response = await fetch(`/api/agent/registry/functions?userId=${userId}`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-            for (const row of rows) {
-                const fn = JSON.parse(row.definition);
-                // Sink metrics from DB into memory
-                fn.metadata = {
-                    usageCount: row.usage_count,
-                    successRate: row.success_rate,
-                    avgExecutionTimeMs: row.avg_execution_time_ms
-                };
+            const functions: ComposedFunction[] = await response.json();
+
+            for (const fn of functions) {
                 this.composedFunctions.set(fn.id, fn);
             }
 
-            logger.info("Composed functions loaded from DB", { count: rows.length });
+            logger.info("Composed functions loaded from API", { count: functions.length });
         } catch (error: any) {
             logger.error("Failed to load composed functions", { error: error.message });
         }
     }
 
     /**
-     * Register AI-composed function
+     * Register AI-composed function (Persists via API)
      */
     async registerComposedFunction(fn: ComposedFunction, userId?: string) {
         this.composedFunctions.set(fn.id, fn);
 
         if (userId) {
             try {
-                await db.execute(
-                    `INSERT INTO composed_functions (id, user_id, definition, created_at, updated_at)
-                     VALUES (?, ?, ?, ?, ?)
-                     ON CONFLICT(id) DO UPDATE SET definition = excluded.definition, updated_at = excluded.updated_at`,
-                    [
-                        fn.id,
-                        userId,
-                        JSON.stringify(fn),
-                        fn.createdAt || new Date().toISOString(),
-                        new Date().toISOString()
-                    ]
-                );
+                const response = await fetch('/api/agent/registry/functions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fn, userId })
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
             } catch (error: any) {
                 logger.error("Failed to persist composed function", { error: error.message });
             }

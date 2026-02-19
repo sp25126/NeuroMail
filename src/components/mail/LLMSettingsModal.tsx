@@ -63,11 +63,21 @@ export function LLMSettingsModal({ isOpen, onClose }: { isOpen: boolean; onClose
             if (apiKey.trim()) body.apiKey = apiKey.trim()
             if (selectedProviderInfo) body.model = selectedProviderInfo.defaultModel
 
+            // 1. Save to DB (User Preferences)
             await fetch("/api/user/preferences/llm", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             })
+
+            // 2. Sync with Client Store (Crucial for AssistantPanel)
+            const { updateSettings } = await import("@/store/useSettingsStore").then(m => m.useSettingsStore.getState())
+            updateSettings({
+                aiProvider: selectedProvider as any,
+                aiApiKey: apiKey.trim() || undefined,
+                aiModel: selectedProviderInfo?.defaultModel || "llama3.2:latest"
+            })
+
             setSaved(true)
             setTimeout(() => setSaved(false), 2000)
 

@@ -1,4 +1,4 @@
-import { ToolCall } from "../tools/definitions";
+import { ToolCall } from "../tools/tools-definitions";
 
 /**
  * Infer tool calls from user intent when AI doesn't explicitly call functions
@@ -82,7 +82,7 @@ export class IntentInference {
 
             const query = this.extractSearchQuery(userMessage);
             if (query) {
-                calls.push(this.createCall("search_emails", { query }));
+                calls.push(this.createCall("searchEmails", { query }));
                 console.log("✅ [INFERENCE] Search:", query);
 
                 // If also mentions "open" or "show", add open action
@@ -111,7 +111,7 @@ export class IntentInference {
             const emailMatch = userMessage.match(/\b([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i);
             const subjectMatch = userMessage.match(/subject[:\s]+["']?([^"'\n]+)["']?/i);
 
-            calls.push(this.createCall("open_compose", {
+            calls.push(this.createCall("composeEmail", {
                 to: emailMatch?.[1] || "",
                 subject: subjectMatch?.[1] || "",
             }));
@@ -187,12 +187,12 @@ export class IntentInference {
      */
     private static extractParams(message: string, toolName: string): Record<string, any> {
         // Tool-specific param extraction
-        if (toolName === "search_emails") {
+        if (toolName === "searchEmails") {
             const query = this.extractSearchQuery(message);
             return query ? { query } : {};
         }
 
-        if (toolName === "open_compose") {
+        if (toolName === "composeEmail") {
             const emailMatch = message.match(/\b([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})\b/i);
             return emailMatch ? { to: emailMatch[1] } : {};
         }

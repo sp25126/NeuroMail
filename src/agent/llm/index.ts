@@ -2,7 +2,7 @@ import { LLMConfig, LLMProvider, LLMRequest, LLMResponse, DEFAULT_MODELS, PROVID
 import { callOllama, isOllamaAvailable } from "./ollama";
 import { callOpenAI } from "./openai";
 import { callOpenRouter } from "./openrouter";
-import { getPreferenceByEmail } from "../storage";
+import { getPreferenceByEmail } from "@/agent/storage";
 
 /**
  * The single entry point for ALL LLM calls in the application.
@@ -26,6 +26,12 @@ export async function generateLLMResponse(
             if (!config.apiKey) throw new Error("Missing OpenRouter API key. Set it in AI Settings.");
             return callOpenRouter(config.apiKey, req, config.model);
 
+        case "colab":
+            // Colab Brain uses Ollama API format but at a custom tunnel URL
+            const colabBaseUrl = config.colabUrl || process.env.NEXT_PUBLIC_COLAB_BRAIN_URL;
+            if (!colabBaseUrl) throw new Error("Missing Colab Brain URL. Set it in AI Settings.");
+            return callOllama(req, config.model, colabBaseUrl);
+
         default:
             throw new Error(`Unsupported LLM provider: ${config.provider}`);
     }
@@ -35,21 +41,22 @@ export async function generateLLMResponse(
  * Build LLMConfig from user preferences.
  * Falls back to Ollama if no provider is set.
  */
-export function getLLMConfig(userEmail: string): LLMConfig {
-    const prefs = getPreferenceByEmail(userEmail);
+export async function getLLMConfig(userEmail: string): Promise<LLMConfig> {
+    const prefs = await getPreferenceByEmail(userEmail);
 
-    const provider: LLMProvider = prefs?.llmProvider || "ollama";
-    const model = prefs?.llmModel || DEFAULT_MODELS[provider];
-    const apiKey = prefs?.llmApiKey;
+    const provider: LLMProvider = prefs?.llm_provider || "ollama";
+    const model = prefs?.llm_model || DEFAULT_MODELS[provider];
+    const apiKey = prefs?.llm_api_key;
+    const colabUrl = prefs?.colab_url;
 
-    return { provider, model, apiKey };
+    return { provider, model, apiKey, colabUrl };
 }
 
 /**
  * Get the current provider label for UI display
  */
-export function getProviderLabel(userEmail: string): string {
-    const config = getLLMConfig(userEmail);
+export async function getProviderLabel(userEmail: string): Promise<string> {
+    const config = await getLLMConfig(userEmail);
     return PROVIDER_LABELS[config.provider];
 }
 

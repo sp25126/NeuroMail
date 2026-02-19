@@ -1,11 +1,11 @@
-import { generateLLMResponse, getLLMConfig } from "@/lib/llm";
+import { generateLLMResponse, getLLMConfig } from "@/agent/llm";
 import { getGmailClient } from "@/lib/gmail";
 import { handleApi } from "@/lib/api-handler";
 
 export async function POST(req: Request) {
     return handleApi({ route: "POST /api/ai/analyze-style", requireAuth: true }, async (ctx) => {
         const gmail = await getGmailClient();
-        const llmConfig = getLLMConfig(ctx.userEmail);
+        const llmConfig = await getLLMConfig(ctx.userEmail);
 
         // Fetch last 20 sent emails
         const response = await gmail.users.messages.list({

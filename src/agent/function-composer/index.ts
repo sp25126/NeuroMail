@@ -1,6 +1,7 @@
 
-import { uiRegistry, UIOperation } from "@/lib/ui-registry";
-import { ToolCall } from "../tools/definitions";
+import { uiRegistry } from "@/agent/ui-registry/registry";
+import { UIOperation } from "@/agent/ui-registry/types";
+import { ToolCall } from "../tools/tools-definitions";
 
 /**
  * AI Function Composer - Allows AI to create new functions dynamically
@@ -11,6 +12,7 @@ export interface ComposedFunction {
     name: string;
     description: string;
     code: string;
+    body?: string; // Optional body for fallback compatibility
     parameters?: any[];
     createdAt: string;
     usageCount: number;
@@ -121,24 +123,23 @@ Now generate the function for: ${description}`;
      * Register a composed function in the UI registry
      */
     public registerComposedFunction(func: ComposedFunction) {
-        uiRegistry.register({
+        uiRegistry.registerOperation({
             id: func.name,
-            type: "action",
-            label: func.name,
+            name: func.name,
             description: func.description,
+            category: "view", // Categorize as view or appropriate category
+            endpoint: "/api/agent/execute-composed", // Composed functions should go through a specific endpoint
+            method: "POST",
             parameters: func.parameters?.map((p: any) => ({
                 name: p.name,
                 type: p.type,
                 description: p.description,
                 required: p.required ?? false,
-            })),
-            execute: async (params: any) => {
-                return await this.executeComposedFunction(func.id, params);
-            },
-            metadata: {
-                category: "composed",
-                keywords: [func.name, "custom", "composed"],
-            },
+            })) || [],
+            returns: { type: "any", description: "Result of composed function" },
+            permissions: ["ai.execute"],
+            rateLimit: { maxCalls: 10, windowMs: 60000 },
+            examples: []
         });
 
         console.log("📋 [COMPOSER] Registered in UI registry:", func.name);
@@ -222,13 +223,21 @@ Now generate the function for: ${description}`;
     }
 
     /**
+     * Get a composed function by ID
+     */
+    getFunction(id: string): ComposedFunction | undefined {
+        return this.composedFunctions.get(id);
+    }
+
+    /**
      * Delete a composed function
      */
     deleteFunction(functionId: string): boolean {
         const func = this.composedFunctions.get(functionId);
         if (func) {
             this.composedFunctions.delete(functionId);
-            uiRegistry.unregister(func.name);
+            // The current registry doesn't have an unregister operation. 
+            // In a real scenario, we might want to implement it, but for now we'll just remove from our local map.
             console.log("🗑️ [COMPOSER] Deleted function:", func.name);
             return true;
         }

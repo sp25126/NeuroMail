@@ -1,0 +1,26 @@
+node_modules/sonner/dist/index.d.ts(1,8): error TS1259: Module '"C:/Users/saumy/OneDrive/Desktop/task/node_modules/@types/react/index"' can only be default-imported using the 'esModuleInterop' flag
+src/components/assistant/AssistantPanel.tsx(6,30): error TS2307: Cannot find module '@/store/useMailStore' or its corresponding type declarations.
+src/components/assistant/AssistantPanel.tsx(7,34): error TS2307: Cannot find module '@/store/useSettingsStore' or its corresponding type declarations.
+src/components/assistant/AssistantPanel.tsx(8,28): error TS2307: Cannot find module '@/lib/ui-registry' or its corresponding type declarations.
+src/components/assistant/AssistantPanel.tsx(10,34): error TS2307: Cannot find module '@/agent/function-composer' or its corresponding type declarations.
+src/components/assistant/AssistantPanel.tsx(11,35): error TS2307: Cannot find module '@/store/useAIChangesStore' or its corresponding type declarations.
+src/components/assistant/AssistantPanel.tsx(339,9): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(341,13): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(342,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(343,21): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(344,25): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(345,25): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(351,13): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(352,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(354,25): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(361,29): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(367,33): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(373,21): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(378,25): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(379,29): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(383,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(387,13): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(388,17): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(389,21): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(397,21): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.
+src/components/assistant/AssistantPanel.tsx(402,25): error TS17004: Cannot use JSX unless the '--jsx' flag is provided.

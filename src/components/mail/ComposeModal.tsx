@@ -161,12 +161,15 @@ export function ComposeModal() {
                             </div>
                             <div className="flex items-center gap-1">
                                 <button
+                                    id="compose-minimize"
                                     onClick={() => setIsMinimized(!isMinimized)}
                                     className="p-1.5 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-foreground transition-all"
                                 >
                                     <Minus size={14} />
                                 </button>
                                 <button
+                                    id="compose-close"
+                                    data-ai-id="compose_close_action"
                                     onClick={handleClose}
                                     className="p-1.5 rounded-lg hover:bg-destructive/20 text-muted-foreground hover:text-destructive transition-all"
                                 >
@@ -189,6 +192,8 @@ export function ComposeModal() {
                                         <div className="flex items-center gap-3 border-b border-white/5 pb-3">
                                             <label className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-widest w-8">To</label>
                                             <input
+                                                id="compose-to"
+                                                data-ai-id="compose_to_input"
                                                 placeholder="recipient@email.com"
                                                 className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/30 focus:outline-none"
                                                 value={formData.to}
@@ -200,6 +205,8 @@ export function ComposeModal() {
                                         <div className="flex items-center gap-3 border-b border-white/5 pb-3">
                                             <label className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-widest w-8">Subj</label>
                                             <input
+                                                id="compose-subject"
+                                                data-ai-id="compose_subject_input"
                                                 placeholder="Subject"
                                                 className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/30 focus:outline-none"
                                                 value={formData.subject}
@@ -209,6 +216,8 @@ export function ComposeModal() {
                                         </div>
 
                                         <textarea
+                                            id="compose-body"
+                                            data-ai-id="compose_body_input"
                                             placeholder="Write your message..."
                                             className="flex-1 min-h-[250px] bg-transparent text-sm text-foreground/90 placeholder:text-muted-foreground/30 resize-none focus:outline-none leading-relaxed"
                                             value={formData.body}
@@ -229,6 +238,8 @@ export function ComposeModal() {
                                         </div>
 
                                         <motion.button
+                                            id="compose-send"
+                                            data-ai-id="compose_send_action"
                                             onClick={handleSendClick}
                                             disabled={isSending || sendStatus === "success"}
                                             whileHover={{ scale: 1.03 }}

@@ -13,10 +13,12 @@ import {
     ThreadSummary,
     ClientState,
 } from "../types";
-import { TOOLS, ToolCall, ToolName } from "../tools/definitions";
+import { TOOLS, ToolCall, ToolName, ToolDefinition, getToolByName } from "../tools/tools-definitions";
 import { FunctionCallParser } from "./function-parser";
 import { IntentInference } from "./intent-inference";
-import { uiRegistry } from "@/lib/ui-registry";
+// import { uiRegistry } from "@/lib/ui-registry";
+// import { smartToolRegistry } from "../smart-registry";
+// import { ToolCategory } from "../smart-registry/types";
 
 const logger = createLogger("Orchestrator");
 
@@ -27,11 +29,12 @@ export interface ConversationContext {
     recentThreads: any[];
     userMessage: string;
     conversationHistory?: any[];
-    cookies?: string; // Added for server-side API calls
-    availableTools?: any[]; // Dynamic tools from client
-    llmConfig?: LLMConfig; // Added for function composer
-    clientState?: ClientState; // Added for UI observability
+    cookies?: string;
+    availableTools?: any[];
+    llmConfig?: LLMConfig;
+    clientState?: ClientState;
     isSlashCommand?: boolean;
+    screenContext?: string;
 }
 
 export interface AgentRequest {
@@ -42,10 +45,11 @@ export interface AgentRequest {
     recentThreads: ThreadSummary[];
     llmConfig: LLMConfig;
     persona?: string;
-    cookies?: string; // Added for server-side API calls
-    availableTools?: any[]; // Dynamic tools from client
-    clientState?: ClientState; // Added for UI observability
+    cookies?: string;
+    availableTools?: any[];
+    clientState?: ClientState;
     isSlashCommand?: boolean;
+    screenContext?: string;
 }
 
 export interface AgentResponse {
@@ -63,18 +67,78 @@ export interface AgentResponse {
 
 export class AgentOrchestrator {
     /**
-     * Main orchestration flow — autonomous execution
+     * System prompt with STRICT constraints.
      */
-    public async executeRequest(request: AgentRequest): Promise<AgentResponse> {
-        console.log("🚀 [ORCHESTRATOR] Execute request:", {
-            message: request.userMessage,
-            view: request.appState?.view,
-            hasCurrentThread: !!request.currentThread,
-            recentThreadsCount: request.recentThreads?.length || 0,
-            dynamicToolsCount: request.availableTools?.length || 0,
+    private systemPrompt = `
+You are Neuromail's AI Agent.
+You have access to a STRICTLY DEFINED set of tools.
+You must analyze the user's request and execute the appropriate tools.
+
+Rules:
+1.  **NO FAKE JSON TOOLS**. You must ONLY use the tools defined in the 'tools' section.
+2.  If you need to perform a composite action or a complex workflow, use the \`generate_workflow\` tool.
+3.  Do not output plain text unless you are asking a clarifying question.
+4.  Do not use semicolons in your tool calls if the tool definition doesn't require them.
+5.  Always think step-by-step.
+
+Tools:
+{{TOOLS}}
+`;
+
+    /**
+     * Execute a request and stream the response (AgentResponse).
+     */
+    private getToolDescriptions(): string {
+        return TOOLS.map((t: ToolDefinition) => `- ${t.name}: ${t.description}`).join("\n");
+    }
+
+    /**
+     * Execute a request and stream the response (AgentResponse).
+     */
+    async *executeRequestStream(
+        config: LLMConfig,
+        request: AgentRequest
+    ): AsyncGenerator<AgentResponse, void, unknown> {
+        const llmProvider = LLMProviderFactory.create(config);
+
+        const stream = llmProvider.generateStream([
+            { role: "system", content: this.systemPrompt.replace("{{TOOLS}}", this.getToolDescriptions()) },
+            { role: "user", content: request.userMessage }
+        ], {
+            temperature: 0.1,
+            tools: this.convertToolsToNativeFormat(
+                // Context construction matching executeRequest logic if possible, 
+                // but here we might need to reconstruct context unless we pass it in.
+                // AgentRequest has components of context.
+                {
+                    sessionId: request.sessionId,
+                    appState: request.appState,
+                    userMessage: request.userMessage,
+                    currentThread: request.currentThread,
+                    recentThreads: request.recentThreads,
+                    cookies: request.cookies,
+                    availableTools: request.availableTools,
+                    llmConfig: request.llmConfig,
+                    clientState: request.clientState,
+                    screenContext: request.screenContext
+                } as ConversationContext
+            ),
         });
 
+        for await (const chunk of stream) {
+            if (chunk.type === "token") {
+                yield {
+                    assistantMessage: chunk.content,
+                    toolCalls: [],
+                    toolResults: [],
+                    metadata: { traceId: "stream", executionTimeMs: 0, tokensUsed: 0, toolsExecuted: 0 }
+                } as AgentResponse;
+            }
+        }
+    }
+    public async executeRequest(request: AgentRequest): Promise<AgentResponse> {
         const traceId = uuidv4();
+        const startTime = Date.now();
 
         try {
             const isSlashCommand = request.userMessage.trim().startsWith("/");
@@ -93,61 +157,20 @@ export class AgentOrchestrator {
                 llmConfig: request.llmConfig,
                 clientState: request.clientState,
                 isSlashCommand,
+                screenContext: request.screenContext,
             };
 
-            // ⚠️ SLASH COMMAND BYPASS ⚠️
-            // If the user starts with "/", we skip the LLM entirely and execute the tool directly.
+            // ⚠️ SLASH COMMAND BYPASS REMOVED ⚠️
+            // All commands now go through the LLM for "God Mode" processing.
+            // This ensures we use the configured provider (Colab/Ollama) instead of hardcoded logic.
+
+            /* 
             if (isSlashCommand) {
-                console.log("⚡ [ORCHESTRATOR] Slash command detected. Bypassing LLM.");
-                // 1. Parse the command using our parser
-                const toolCalls = FunctionCallParser.parse(request.userMessage, request.availableTools || []);
+                 ... old logic removed ...
+            } 
+            */
 
-                // 2. If valid tool call found, proceed to execution
-                if (toolCalls.length > 0) {
-                    console.log("✅ [ORCHESTRATOR] Valid slash command parsed:", toolCalls[0].name);
-                } else {
-                    // Fallback: If parser failed (e.g. invalid syntax), return error
-                    return {
-                        assistantMessage: `Invalid command format: ${request.userMessage}`,
-                        actions: [],
-                        toolCalls: [],
-                        toolResults: [],
-                        metadata: { traceId, executionTimeMs: 0, tokensUsed: 0, toolsExecuted: 0 }
-                    };
-                }
-
-                // 3. Execute immediately (Skip LLM generation)
-                const toolResults: any[] = [];
-                const actions: any[] = [];
-
-                for (const toolCall of toolCalls) {
-                    const result = await this.executeToolCall(toolCall, context);
-                    toolResults.push({ toolCall, result });
-
-                    // Convert tool results to UI actions
-                    if (result.success && result.action) {
-                        actions.push({
-                            type: result.action,
-                            ...result,
-                            ...(result.action === "UI_OPERATION" ? { operationId: toolCall.name, args: toolCall.arguments } : {}),
-                        });
-                    }
-                }
-
-                return {
-                    assistantMessage: `Command executed: ${toolCalls[0].name}`,
-                    actions,
-                    toolCalls,
-                    toolResults,
-                    metadata: { traceId, executionTimeMs: 0, tokensUsed: 0, toolsExecuted: 1 }
-                };
-            }
-
-            // Build system prompt with tools
             const systemPrompt = this.buildSystemPrompt(context);
-
-            // Call LLM
-            console.log("🤖 [ORCHESTRATOR] Calling LLM...");
             const llmProvider = LLMProviderFactory.create(request.llmConfig);
 
             let messages = [
@@ -155,495 +178,243 @@ export class AgentOrchestrator {
                 { role: "user" as const, content: cleanMessage },
             ];
 
-            // Inject execution reminder
-            messages = this.injectExecutionReminder(messages);
-
+            const allTools = this.convertToolsToNativeFormat(context);
             const llmResponse = await llmProvider.generate(messages, {
-                temperature: 0.1, // Lower temperature = more deterministic
+                temperature: 0.1,
+                tools: allTools,
             });
 
-            console.log("✅ [ORCHESTRATOR] LLM response received:", {
-                contentLength: llmResponse.content.length,
-                preview: llmResponse.content.substring(0, 100),
-            });
+            console.log("🤖 [ORCHESTRATOR] Raw LLM Content:", llmResponse.content);
+            console.log("🛠️ [ORCHESTRATOR] Raw Tool Calls:", JSON.stringify(llmResponse.tool_calls || [], null, 2));
 
-            // Clean responses
             const cleanedMessage = this.cleanAIResponse(llmResponse.content);
+            let toolCalls: ToolCall[] = [];
 
-            // Parse tool calls
-            const toolCalls = FunctionCallParser.parse(llmResponse.content, context.availableTools || []);
+            if (llmResponse.tool_calls && llmResponse.tool_calls.length > 0) {
+                toolCalls = llmResponse.tool_calls.map(tc => ({
+                    id: tc.id || `native_${uuidv4()}`,
+                    name: tc.function.name as ToolName,
+                    arguments: typeof tc.function.arguments === 'string'
+                        ? JSON.parse(tc.function.arguments)
+                        : tc.function.arguments
+                }));
+            } else {
+                toolCalls = this.parseToolCalls(llmResponse.content, cleanMessage, context);
+            }
 
-            // Execute tool calls
             const toolResults: any[] = [];
             const actions: any[] = [];
-
             for (const toolCall of toolCalls) {
                 const result = await this.executeToolCall(toolCall, context);
                 toolResults.push({ toolCall, result });
-
-                // Convert tool results to UI actions
-                if (result.success && result.action) {
-                    actions.push({
-                        type: result.action,
-                        ...result,
-                        // For generic UI operations, pass the operationId
-                        ...(result.action === "UI_OPERATION" ? { operationId: toolCall.name, args: toolCall.arguments } : {}),
-                    });
-                } else if (result.success && result.results) {
-                    // Search returned results - if only one result, auto-open it
-                    if (result.results.length === 1 && request.userMessage.match(/\b(open|read|show)\b/)) {
-                        actions.push({
-                            type: "SEARCH",
-                            query: toolCall.arguments.query,
-                        });
-                        actions.push({
-                            type: "OPEN_THREAD",
-                            threadId: result.results[0].id,
-                        });
-                    } else {
-                        actions.push({
-                            type: "SEARCH",
-                            query: toolCall.arguments.query,
-                        });
-                    }
-                }
+                if (result.success && result.action) actions.push({ type: result.action, ...result });
             }
-
-            console.log("🎯 [ORCHESTRATOR] Returning:", {
-                messageLength: llmResponse.content.length,
-                toolCallsCount: toolCalls.length,
-                actionsCount: actions.length,
-                actions: actions.map(a => a.type),
-            });
 
             return {
                 assistantMessage: cleanedMessage,
                 actions,
-                toolCalls: toolCalls,
+                toolCalls,
                 toolResults,
                 metadata: {
                     traceId,
-                    executionTimeMs: 0,
+                    executionTimeMs: Date.now() - startTime,
                     tokensUsed: 0,
                     toolsExecuted: toolCalls.length,
                 },
             };
         } catch (error: any) {
-            console.error("❌ [ORCHESTRATOR] Error:", error);
-
+            console.error("❌ Orchestrator Error:", error);
             return {
-                assistantMessage: "I encountered an error processing your request.",
-                actions: [],
-                toolCalls: [],
-                toolResults: [],
-                metadata: {
-                    traceId,
-                    executionTimeMs: 0,
-                    tokensUsed: 0,
-                    toolsExecuted: 0,
-                },
+                assistantMessage: "I encountered an error.",
+                actions: [], toolCalls: [], toolResults: [],
+                metadata: { traceId, executionTimeMs: 0, tokensUsed: 0, toolsExecuted: 0 },
             };
         }
     }
 
-    async *executeRequestStream(
-        request: AgentRequest
-    ): AsyncGenerator<{
-        type: "token" | "tool_call" | "tool_result" | "done" | "error";
-        content: string;
-        data?: any;
-    }> {
-        // Stream implementation - simplified for now
-        const traceId = uuidv4();
-        yield { type: "done", content: "", data: { traceId } };
-    }
-
-    /**
-     * Inject execution reminder into messages
-     */
     private injectExecutionReminder(messages: any[]): any[] {
-        // Add a strong reminder before the user message
-        const reminder = {
-            role: "system" as const,
-            content: `CRITICAL REMINDER:
-  - DO NOT say "Let me..." or "I will..."
-  - DO NOT explain what you're doing
-  - ONLY output function calls in this format: functionName({ param: "value" })
-  - Example: If user says "toggle theme", you output: toggle_theme()
-  - NO OTHER TEXT`,
-        };
-
-        // Insert reminder before last user message
-        const lastUserIndex = messages.map(m => m.role).lastIndexOf("user");
-
-        if (lastUserIndex !== -1) {
-            messages.splice(lastUserIndex, 0, reminder);
-        }
-
+        // Not needed with God Mode prompt
         return messages;
     }
 
-    /**
-     * Clean AI response - remove narration, keep only facts
-     */
+
     private cleanAIResponse(response: string): string {
-        // Remove common narration phrases
-        const cleaned = response
-            .replace(/^(Let me|I will|I'll|I'm going to|I am|I can|Here's what I'll do|Sure|Okay|Alright)[,:]?\s*/gi, '')
-            .replace(/^(Searching|Opening|Toggling|Setting|Sending|Finding|Refreshing)[.!]?\s*/gim, '')
-            .replace(/\.\.\./g, '')
-            .replace(/^(You|AI|Assistant|Assistant:):\s*/gim, "")
-            .trim();
-
-        // If cleaned matches a tool call pattern, or is empty, return generic success message
-        // This avoids showing function calls in the chat bubble
-        const toolPattern = /^\w+\s*\(/;
-        if (cleaned.length < 5 || toolPattern.test(cleaned)) {
-            return "Done.";
-        }
-
+        const cleaned = response.replace(/^(Let me|I will|Sure|Okay)[,:]?\s*/gi, '').trim();
         return cleaned;
     }
 
     private buildSystemPrompt(context: ConversationContext): string {
-        const composedFunctions = functionComposer.listFunctions();
+        return `You are an advanced UI Automation Engine.
+You do not write code. You output JSON plans using the \`execute_ai_plan\` tool.
 
-        // Build tools description
-        const staticToolsDesc = TOOLS.map(t => {
-            const params = Object.keys(t.parameters.properties).length > 0
-                ? `(${Object.keys(t.parameters.properties).join(", ")})`
-                : "()";
-            return `- ${t.name}${params}: ${t.description}`;
-        }).join('\n');
+## THE PROTOCOL
+1. **TOOL USAGE BOUNDARIES (CRITICAL)**:
+   - **generate_workflow**: Use this for ALL data operations, backend logic, email management (search, read, draft, bulkAction, reply), and theme changes. This is your primary brain.
+   - **execute_ai_plan**: Use this ONLY for physical UI interactions (mouse clicks, typing into specific input fields). You must have a valid targetId from the screen. NEVER pass backend commands (like bulkAction) into this tool.
 
-        let dynamicToolsDesc = "";
-        if (context.availableTools && context.availableTools.length > 0) {
-            dynamicToolsDesc += "\n### SPECIFIC UI ACTIONS\n";
-            context.availableTools.forEach((tool: any) => {
-                const params = tool.parameters?.map((p: any) => `${p.name}`).join(", ") || "";
-                dynamicToolsDesc += `- ${tool.id}(${params}): ${tool.description}\n`;
-            });
-        }
+2. **Targeting**: You can ONLY target elements with 'data-ai-id' listed in the DOM SNAPSHOT.
+   - ❌ NEVER guess IDs (e.g., #compose-btn).
+   - ✅ ALWAYS use the exact 'id' from the snapshot (e.g., sidebar_compose_action).
 
-        const currentEmailStatus = context.currentThread ? `"${context.currentThread.subject}"` : "None";
+2. **Visibility**: Do not interact with elements marked "hidden".
 
-        return `You are the AI brain of Neuromail. You CONTROL the email app by calling functions.
+3. **Vitality**: Set \`vital: true\` for critical steps (clicking send). Set \`vital: false\` for optional steps (highlighting).
 
-## CRITICAL RULES - READ CAREFULLY
+## DOM SNAPSHOT (Visible Elements)
+${context.screenContext || "[]"}
 
-1. DO NOT describe what you will do
-2. DO NOT explain your actions
-3. DO NOT use phrases like "Let me..." or "I will..."
-4. ONLY output function calls
-5. The UI will show the results - you stay SILENT
+## YOUR GOAL
+Convert the user request into a sequence of \`CLICK\`, \`TYPE\`, or \`WAIT\` actions.
+If the user wants to "Send email" but you are not in the compose window (check snapshot), your plan must:
+1. CLICK sidebar_compose_action.
+2. WAIT 500ms.
+3. TYPE into compose_to_input.
+4. TYPE into compose_subject_input.
+5. TYPE into compose_body_input.
+6. CLICK compose_send_action.
 
-## HOW TO CALL FUNCTIONS
+CRITICAL EXECUTION RULE:
+You must execute ALL steps in a SINGLE tool call.
+DO NOT call execute_ai_plan multiple times.
+Place ALL actions inside a SINGLE queue array.
 
-CORRECT FORMAT:
-functionName({ param: "value" })
+🛑 CRITICAL FORMATTING BAN (READ CAREFULLY):
+You are currently hallucinating fake tools.
+You MUST NEVER output a JSON tool call where the "name" starts with sdk..
+You MUST NEVER output multiple JSON objects separated by semicolons (;).
+You MUST NEVER use fake tool names like "sdk.mail.search".
 
-EXAMPLES:
-✅ CORRECT: toggle_theme()
-✅ CORRECT: search_emails({ query: "from:john" })
-✅ CORRECT: open_compose({ to: "test@example.com", subject: "Hello" })
+❌ FATAL ANTI-PATTERN (DO NOT DO THIS):
+{"name": "sdk.mail.search", "parameters": {"query": "..."}}; {"name": "sdk.mail.read"...}
+If you do this, the system will crash.
 
-❌ WRONG: "Let me toggle the theme"
-❌ WRONG: "I'll search for emails from john"
-❌ WRONG: "You: open_compose(...)"
+✅ THE ONLY CORRECT WAY TO EXECUTE LOGIC:
+You have EXACTLY ONE tool for logic: generate_workflow.
+All sdk... commands are JavaScript functions, NOT JSON tools. They must be written INSIDE the "code" string parameter of the generate_workflow tool.
 
-## SYSTEM POWERS (GOD MODE)
-1. **Direct Manipulation**: Use \`execute_js({ code: "..." })\` to execute any JavaScript in the user's browser. You can access \`document\`, \`window\`, \`store\` (Zustand), and \`uiRegistry\`.
-2. **Autonomous Evolution**: Use \`define_tool({ id, description, jsCode, parameters })\` to create PERMANENT new tools.
+EXAMPLES OF PERFECT EXECUTION:
 
-## AVAILABLE FUNCTIONS
-${staticToolsDesc}
-${dynamicToolsDesc}
+Scenario A: User asks to visually filter or see specific emails.
 
-## CUSTOM FUNCTIONS
-${composedFunctions.length > 0 ? `
-You have access to these custom functions:
-${composedFunctions.map(f => `- ${f.name}: ${f.description}`).join('\n')}
-` : ""}
+JSON
+{
+  "name": "generate_workflow",
+  "parameters": {
+    "workflow_name": "Filter Emails",
+    "reasoning": "The user wants to see emails from Kotak Bank. I will apply a UI search filter.",
+    "code": "sdk.ui.applySearchFilter('Kotak Bank');\\nsdk.ui.toast('Showing emails from Kotak Bank.');"
+  }
+}
 
-## CURRENT STATE
-- View: ${context.appState.view}
-- Current email: ${currentEmailStatus}
-${context.clientState ? `- Theme: ${context.clientState.theme}
-- Sidebar: ${context.clientState.isSidebarOpen ? "Open" : "Collapsed"}
-- Compose Modal: ${context.clientState.isComposeOpen ? "Open" : "Closed"}` : ""}
+Scenario B: User asks for an automated background task (e.g., mark as read).
 
-## RESPONSE PROTOCOL
+JSON
+{
+  "name": "generate_workflow",
+  "parameters": {
+    "workflow_name": "Processity Task",
+    "reasoning": "Finding unread emails and marking them as read in the background.",
+    "code": "const emails = await sdk.mail.search('from:Processity is:unread');\\nif (emails.length > 0) {\\n  await sdk.mail.bulkAction(emails.map(e => e.id), 'read');\\n  sdk.ui.toast('Marked ' + emails.length + ' emails as read.');\\n}"
+  }
+}
 
-When user asks for something:
-1. Call the appropriate function(s)
-2. Say NOTHING else
-3. Let the UI confirm the action
+## GENERATE_WORKFLOW (Advanced Logic)
+For complex tasks (theming, math, data processing), use 'generate_workflow'.
+You DO NOT have access to the DOM. document/window are undefined.
+You MUST use the 'sdk' object.
 
-EXAMPLES:
+**SDK COMMANDS**:
+- sdk.mail.search(query) -> Returns emails.
+- sdk.mail.read(threadId) -> Opens email.
+- sdk.mail.draft(to, subject, body) -> Creates draft.
+- sdk.mail.reply(threadId, body) -> Replies.
+- sdk.mail.bulkAction(ids, action) -> 'archive'|'delete'|'star'|'read'|'unread'|'spam'.
+- sdk.mail.snooze(id, isoDate) -> Snooze.
+- sdk.mail.sync() -> Force sync.
+- sdk.ui.navigate(folder) -> 'inbox'|'sent'|'starred'|'drafts'|'trash'|'settings'.
+- sdk.ui.setTheme(hex) -> Set brand color.
+- sdk.ui.setMode('dark'|'light') -> Toggle theme.
+- sdk.ui.setDensity(compact: boolean) -> Toggle view.
+- sdk.ui.toast(msg) -> Notify user.
+- sdk.ui.applySearchFilter('query') -> Visually filters the user's email list on the screen.
+- sdk.settings.setAiPersona(persona) -> 'professional'|'casual'|'enthusiastic'|'concise'.
+- sdk.settings.setProvider(provider) -> Set AI backend.
 
-User: "toggle the theme"
-You: toggle_theme()
+**OUT-OF-BOUNDS DIRECTIVE**: 
+You are restricted to the primitives inside the sdk object. If the user asks for an impossible action (e.g., booking a flight, translating text via external API, deleting structural UI components, inventing non-existent features):
+- DO NOT hallucinate fake SDK methods (e.g., sdk.uber.book()).
+- DO NOT try to write raw fetch calls or DOM hacks.
+- You MUST write a workflow that uses sdk.ui.toast("I do not have the capability to do that yet.") and politely gracefully degrade.
 
-User: "find emails from Sarah"
-You: search_emails({ query: "from:Sarah" })
+**CRITICAL CODE GENERATION RULES**:
+When using the generate_workflow tool, your code parameter MUST contain ONLY valid, raw, asynchronous JavaScript.
+- DO NOT redefine the sdk object. It is already injected for you.
+- DO NOT wrap the code in a JSON object.
+- You MUST use await for all sdk.mail methods.
 
-## REMEMBER
-- You are NOT a chatbot
-- You are a CONTROLLER
-- Execute functions, don't describe them
-- Be SILENT - let the UI do the talking`;
+STRICT SYNTAX RULE (CRITICAL):
+You are writing code inside a JSON string. You MUST double-check your bracket and brace matching.
+If you open an if block with {, you MUST close it with }.
+A missing closing brace will crash the system.
+
+✅ CORRECT EXAMPLE:
+"code": "const emails = await sdk.mail.search('from:Processity is:unread');\\nif (emails.length > 0) {\\n  await sdk.mail.bulkAction(emails.map(e =\u003e e.id), 'read');\\n  sdk.mail.draft(emails[0].from, 'Reply', 'Reviewing now.');\\n  sdk.ui.toast('Processed emails.');\\n}"
+
+❌ INCORRECT EXAMPLE:
+"code": "{ \\"sdk\\": { ... } }" (NEVER do this. Never redefine the SDK).`;
     }
 
-    /**
-     * Get all available tool names (dynamic + static)
-     */
+    private convertToolsToNativeFormat(context: ConversationContext): any[] {
+        return TOOLS.map((t: ToolDefinition) => ({
+            type: "function", function: { name: t.name, description: t.description, parameters: t.parameters }
+        }));
+    }
+
     private getAvailableTools(context: ConversationContext): string[] {
-        const staticTools = TOOLS.map(t => t.name);
-        // Also check if any legacy/fallback names are needed
-        const legacyTools = ["searchEmails", "openThread", "composeEmail", "navigateToFolder"];
-
-        const dynamicTools = context.availableTools ? context.availableTools.map((op: any) => op.id) : [];
-        return [...new Set([...staticTools, ...legacyTools, ...dynamicTools])];
+        return TOOLS.map(t => t.name);
     }
 
-    /**
-     * Parse function calls from AI response
-     */
     private parseToolCalls(aiResponse: string, userMessage: string, context: ConversationContext): ToolCall[] {
         const availableTools = this.getAvailableTools(context);
-
-        console.log("🔧 [ORCHESTRATOR] Parsing tool calls from:", {
-            responsePreview: aiResponse.substring(0, 150),
-            userMessage,
-            availableToolsCount: availableTools.length,
-        });
-
-        // Method 1: Parse explicit function calls from AI response
-        let toolCalls = FunctionCallParser.parse(aiResponse, availableTools);
-
-        // Method 2: If no explicit calls, infer from intent
-        if (toolCalls.length === 0) {
-            console.log("⚠️ [ORCHESTRATOR] No explicit function calls, inferring from intent...");
-            toolCalls = IntentInference.infer(userMessage, aiResponse, context, availableTools);
-        }
-
-        console.log(`📊 [ORCHESTRATOR] Total tool calls: ${toolCalls.length}`);
-        return toolCalls;
+        return FunctionCallParser.parse(aiResponse, availableTools);
     }
 
-    /**
-     * Execute a tool call
-     */
     private async executeToolCall(toolCall: ToolCall, context: ConversationContext): Promise<any> {
-        console.log("🔨 [ORCHESTRATOR] Executing tool:", toolCall.name, toolCall.arguments);
+        console.log("🔨 Executing:", toolCall.name);
 
-        try {
-            // Check if this is a UI registry operation (dynamic)
-            // Use context.availableTools as server-side uiRegistry is empty
-            const dynamicTool = context.availableTools?.find((t: any) => t.id === toolCall.name);
+        const toolDef = getToolByName(toolCall.name);
 
-            if (dynamicTool) {
-                console.log("📋 [ORCHESTRATOR] Validated dynamic tool:", toolCall.name);
-
-                // DON'T execute here - let frontend handle it
-                // Just return action metadata
-
-                const actionTypeMap: Record<string, string> = {
-                    navigation: "NAVIGATE",
-                    filter: "FILTER",
-                    modal: "MODAL",
-                    toggle: "TOGGLE",
-                    action: "ACTION",
-                    input: "INPUT",
-                    button: "BUTTON",
-                };
-
-                let actionType = actionTypeMap[dynamicTool.type] || "UI_OPERATION";
-
-                // Overrides for specific tools to match AssistantPanel handlers
-                if (toolCall.name === "search_emails") actionType = "SEARCH";
-                if (toolCall.name === "open_thread") actionType = "OPEN_THREAD";
-                if (toolCall.name === "open_compose") actionType = "OPEN_COMPOSE";
-                if (toolCall.name === "navigate_inbox" || toolCall.name === "navigate_sent" || toolCall.name === "navigate_drafts" || toolCall.name === "navigate_starred") actionType = "NAVIGATE";
-
-                return {
-                    success: true,
-                    action: actionType,
-                    operationId: toolCall.name,
-                    operationType: dynamicTool.type,
-                    ...toolCall.arguments,
-                };
-            }
-
-            // Handle built-in tools that DO execute on backend (static fallback)
-            switch (toolCall.name) {
-                // FUNCTION COMPOSER TOOLS
-                case "createFunction": {
-                    const { description, name } = toolCall.arguments;
-
-                    console.log("🔧 [TOOL] Creating custom function:", description);
-
-                    const llmProvider = LLMProviderFactory.create(context.llmConfig || {
-                        provider: "ollama",
-                        model: "gemma2:2b",
-                        temperature: 0.2,
-                        streamingEnabled: false
-                    });
-
-                    // Pass request.availableTools to composer
-                    const composedFunc = await functionComposer.composeFunction(
-                        description,
-                        llmProvider,
-                        context.availableTools || []
-                    );
-
-                    // Don't save on server - client will save it
-                    // await functionComposer.saveToStorage();
-
-                    return {
-                        success: true,
-                        action: "FUNCTION_CREATED",
-                        functionName: composedFunc.name,
-                        functionDescription: composedFunc.description,
-                        functionDefinition: composedFunc // Send logic to client
-                    };
-                }
-
-                case "listCustomFunctions": {
-                    console.log("📋 [TOOL] Listing custom functions");
-
-                    const functions = functionComposer.listFunctions();
-
-                    return {
-                        success: true,
-                        functions: functions.map((f) => ({
-                            name: f.name,
-                            description: f.description,
-                            usageCount: f.usageCount,
-                            createdAt: f.createdAt,
-                        })),
-                    };
-                }
-
-                case "execute_js": {
-                    const { code } = toolCall.arguments;
-                    console.log("⚡ [TOOL] Executing dynamic JS:", code?.substring(0, 50) + "...");
-                    return {
-                        success: true,
-                        action: "EXECUTE_JS",
-                        code
-                    };
-                }
-
-                case "define_tool": {
-                    const { id, description, jsCode, parameters } = toolCall.arguments;
-                    console.log("🛠️ [TOOL] Defining new tool:", id);
-
-                    // Send to client for registration
-                    return {
-                        success: true,
-                        action: "REGISTER_TOOL",
-                        toolId: id,
-                        toolDescription: description,
-                        toolJsCode: jsCode,
-                        toolParameters: parameters
-                    };
-                }
-
-                case "deleteFunction": {
-                    const { name } = toolCall.arguments;
-
-                    console.log("🗑️ [TOOL] Deleting function:", name);
-
-                    const func = functionComposer.getFunctionByName(name);
-                    if (!func) {
-                        return { success: false, error: "Function not found" };
-                    }
-
-                    const deleted = functionComposer.deleteFunction(func.id);
-                    await functionComposer.saveToStorage();
-
-                    return {
-                        success: deleted,
-                        action: deleted ? "FUNCTION_DELETED" : "ERROR",
-                    };
-                }
-
-                case "searchEmails": {
-                    const { query } = toolCall.arguments;
-
-                    if (!query) {
-                        return { success: false, error: "Missing query parameter" };
-                    }
-
-                    console.log("🔍 [TOOL] Searching emails:", query);
-
-                    // Call API to search
-                    const url = `${process.env.NEXTAUTH_URL || 'http://localhost:3003'}/api/mail/threads?q=${encodeURIComponent(query)}`;
-
-                    const response = await fetch(url, {
-                        headers: {
-                            cookie: context.cookies || "",
-                        },
-                    });
-                    const data = await response.json();
-                    const threads = data.threads || [];
-
-                    console.log("✅ [TOOL] Search found:", threads.length, "results");
-
-                    return {
-                        success: true,
-                        action: "SEARCH",
-                        query,
-                        results: threads.map((t: any) => ({
-                            id: t.id,
-                            from: t.lastMessage?.from,
-                            subject: t.subject,
-                            snippet: t.snippet,
-                        })),
-                    };
-                }
-
-                case "openThread": {
-                    const { threadId } = toolCall.arguments;
-
-                    if (!threadId) {
-                        return { success: false, error: "Missing threadId parameter" };
-                    }
-
-                    console.log("✅ [TOOL] openThread:", threadId);
-
-                    return {
-                        success: true,
-                        action: "OPEN_THREAD",
-                        threadId,
-                    };
-                }
-
-                case "composeEmail": {
-                    return { success: true, action: "OPEN_COMPOSE", ...toolCall.arguments };
-                }
-
-                case "navigateToFolder": {
-                    return { success: true, action: "NAVIGATE", view: toolCall.arguments.folder };
-                }
-
-                case "replyToEmail": {
-                    return { success: true, action: "OPEN_COMPOSE", ...toolCall.arguments };
-                }
-
-                case "toggle_theme": {
-                    return { success: true, action: "TOGGLE", operationId: "toggle_theme" };
-                }
-
-                default:
-                    console.error("❌ [ORCHESTRATOR] Unknown tool:", toolCall.name);
-                    return { success: false, error: `Unknown tool: ${toolCall.name}` };
-            }
-        } catch (error: any) {
-            console.error("❌ [ORCHESTRATOR] Execution failed:", error);
-            return { success: false, error: error.message };
+        if (!toolDef) {
+            console.error("❌ Unknown tool:", toolCall.name);
+            return { success: false, error: "Unknown tool" };
         }
+
+        // Dispatch based on category
+        if (toolDef.category === "generate_workflow") {
+            // Forward the specific data/logic operation
+            return {
+                success: true,
+                action: "generate_workflow",
+                tool: toolCall.name,
+                ...toolCall.arguments
+            };
+        }
+
+        if (toolDef.category === "execute_ai_plan") {
+            // Forward the specific UI operation
+            // The frontend likely expects an 'EXECUTE_PLAN' action or specific UI commands
+            // For now, mapping to a generic plan structure to maintain contract
+            return {
+                success: true,
+                action: "EXECUTE_PLAN",
+                plan: {
+                    step: toolCall.name,
+                    params: toolCall.arguments
+                }
+            };
+        }
+
+        return { success: false, error: "Unhandled tool category" };
     }
 }
 

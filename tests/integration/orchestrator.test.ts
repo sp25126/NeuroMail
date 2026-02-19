@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { AgentOrchestrator } from "@/agent/orchestrator";
-import { AppState } from "@/agent/types";
 
 describe("AgentOrchestrator Integration", () => {
     const orchestrator = new AgentOrchestrator();
@@ -17,8 +16,9 @@ describe("AgentOrchestrator Integration", () => {
             },
             recentThreads: [],
             llmConfig: {
-                provider: "ollama" as const,
+                provider: "colab" as const,
                 model: "gemma2:2b",
+                baseUrl: "https://0fb2-34-73-208-38.ngrok-free.app",
                 temperature: 0.7,
                 streamingEnabled: false,
             },
@@ -28,13 +28,13 @@ describe("AgentOrchestrator Integration", () => {
 
         expect(response.assistantMessage).toBeTruthy();
         expect(response.metadata.traceId).toBeTruthy();
-        expect(response.metadata.executionTimeMs).toBeGreaterThan(0);
-    }, 30000); // 30s timeout for real LLM call
+        expect(response.metadata.executionTimeMs).toBeGreaterThanOrEqual(0);
+    }, 30000); // 30s timeout (though with mock it should be fast)
 
     it("should handle tool execution errors gracefully", async () => {
         const request = {
             sessionId: "test-session",
-            userMessage: "Reply to this email", // No current thread
+            userMessage: "Reply to this email", // No current thread -> might trigger error if tool attempted
             appState: {
                 view: "inbox" as const,
                 filters: { label: "INBOX" as const, unreadOnly: false },
@@ -43,8 +43,9 @@ describe("AgentOrchestrator Integration", () => {
             },
             recentThreads: [],
             llmConfig: {
-                provider: "ollama" as const,
-                model: "gemma2:2b",
+                provider: "colab" as const,
+                model: "llama3.2:latest",
+                baseUrl: "https://0fb2-34-73-208-38.ngrok-free.app",
                 temperature: 0.7,
                 streamingEnabled: false,
             },

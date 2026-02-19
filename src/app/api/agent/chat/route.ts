@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
-        const { message, sessionId, appState, currentThread, recentThreads, persona, aiProvider, aiModel, availableTools } = body;
+        const { message, sessionId, appState, currentThread, recentThreads, persona, aiProvider, aiModel, aiApiKey, colabUrl, availableTools } = body;
 
         const traceId = uuidv4();
 
@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
             traceId,
             messageLength: message?.length,
             toolsCount: availableTools?.length || 0,
+            provider: aiProvider,
+            colabUrl: colabUrl || "undefined", // DEBUG LOG
         });
 
         // Execute with orchestrator
@@ -38,7 +40,9 @@ export async function POST(req: NextRequest) {
             availableTools: availableTools || [], // Pass client capabilities
             llmConfig: {
                 provider: aiProvider || "ollama",
-                model: aiModel || "gemma2:2b",
+                model: aiModel || "llama3.2:latest",
+                apiKey: aiApiKey || undefined,
+                baseUrl: aiProvider === "colab" ? colabUrl : undefined,
                 temperature: 0.3,
                 streamingEnabled: false,
             },

@@ -1,4 +1,8 @@
 import { z } from "zod";
+import * as dotenv from "dotenv";
+
+dotenv.config();
+dotenv.config({ path: ".env.local" });
 
 const envSchema = z.object({
     // Authentication
@@ -30,14 +34,17 @@ function validateEnv() {
         // Warnings for optional but recommended variables
         if (!env.SENTRY_DSN) console.warn("⚠️  Sentry DSN is missing. Crash reporting will be disabled.");
 
-    } catch (error) {
-        if (error instanceof z.ZodError) {
+    } catch (error: any) {
+        if (error instanceof z.ZodError || (error && typeof error === 'object' && 'issues' in error)) {
             console.error("❌ Invalid Environment Variables:");
-            (error as any).errors.forEach((err: z.ZodIssue) => {
+            const issues = error.issues || [];
+            issues.forEach((err: any) => {
                 console.error(`   - ${err.path.join(".")}: ${err.message}`);
             });
             process.exit(1);
         }
+        console.error("❌ Unexpected error during validation:", error);
+        process.exit(1);
     }
 }
 

@@ -5,9 +5,33 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Send, Loader2, Minimize2, Maximize2 } from "lucide-react";
 import { useMailStore } from "@/store/useMailStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
-import { uiRegistry } from "@/lib/ui-registry";
+import { createNeuromailSDK } from "@/agent/sdk";
 import { toast } from "sonner";
 import { functionComposer } from "@/agent/function-composer";
+import { useAIChangesStore } from "@/store/useAIChangesStore";
+import { useUILoggerStore } from "@/store/useUILoggerStore";
+import { UILogger } from "./UILogger";
+import { DOMQueryEngine } from "@/agent/dom-query";
+import { domScanner } from "@/agent/sandbox/scanner";
+import { uiRegistry } from "@/agent/ui-registry/registry";
+import { executionEngine } from "@/agent/sandbox/executor";
+import { executeAiWorkflow } from "@/agent/sandbox/runner";
+import { ExecutionSandbox } from "@/agent/sandbox/execution-sandbox";
+import { DEFAULT_POLICY } from "@/agent/sandbox/sandbox-types";
+import { AIChangesPanel } from "./AIChangesPanel";
+import { Terminal, ChevronUp, ChevronDown } from "lucide-react";
+
+declare global {
+    interface Window {
+        ai: {
+            click: (id: string) => void;
+            type: (id: string, text: string) => void;
+            toast: (msg: string) => void;
+            setStyle: (id: string, styles: Partial<CSSStyleDeclaration>) => void;
+            navigate: (view: any) => void;
+        }
+    }
+}
 
 export interface Message {
     id: string;
@@ -20,7 +44,9 @@ export function AssistantPanel() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [showLogger, setShowLogger] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const addLog = useUILoggerStore(state => state.addLog);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -48,23 +74,24 @@ export function AssistantPanel() {
         setIsLoading(true);
 
         try {
-            // ⚡ CRITICAL: Serialize UI registry tools for the server
-            const registeredTools = uiRegistry.getAll().map((op) => ({
+            // Serialize UI registry tools for the server
+            const registeredTools = uiRegistry.getAllOperations().map((op) => ({
                 id: op.id,
-                type: op.type,
-                label: op.label,
+                name: op.name,
                 description: op.description,
-                parameters: op.parameters || [],
-                metadata: op.metadata || {},
-                // NOTE: `execute` is a function and cannot be serialized
+                category: op.category,
+                parameters: op.parameters
             }));
+
+            // Get standard screen context
+            const screenContext = JSON.stringify(domScanner.scan());
+
+            const sdk = createNeuromailSDK();
 
             console.log("📤 [ASSISTANT] Sending request:", {
                 message: input,
                 view: store.view,
-                emailsCount: store.emails.length,
                 registeredToolsCount: registeredTools.length,
-                toolIds: registeredTools.map((t) => t.id),
             });
 
             const response = await fetch("/api/agent/chat", {
@@ -79,7 +106,7 @@ export function AssistantPanel() {
                     },
                     clientState: {
                         theme: useSettingsStore.getState().theme,
-                        isSidebarOpen: window.innerWidth < 1024 ? store.isMobileMenuOpen : useSettingsStore.getState().isSidebarOpen,
+                        isSidebarOpen: useSettingsStore.getState().isSidebarOpen,
                         isComposeOpen: store.isComposeOpen,
                         activeModals: store.isComposeOpen ? ["compose"] : [],
                         viewport: {
@@ -90,7 +117,12 @@ export function AssistantPanel() {
                     },
                     currentThread: store.currentThread,
                     recentThreads: store.emails.slice(0, 5),
-                    availableTools: registeredTools, // ⚡ SEND TOOLS TO SERVER
+                    availableTools: [], // PURGED: User requested to remove client-side tool noise (48+ tools)
+                    aiProvider: useSettingsStore.getState().aiProvider,
+                    aiModel: useSettingsStore.getState().aiModel,
+                    aiApiKey: useSettingsStore.getState().aiApiKey,
+                    colabUrl: useSettingsStore.getState().colabUrl,
+                    screenContext, // Inject DOM map
                 }),
             });
 
@@ -100,10 +132,14 @@ export function AssistantPanel() {
 
             const data = await response.json();
 
-            console.log("📥 [ASSISTANT] Full response:", data);
-            console.log("🔍 [ASSISTANT] Actions received:", data.actions);
+            // 1. Execute actions FIRST
+            if (data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+                for (const action of data.actions) {
+                    await executeAction(action);
+                }
+            }
 
-            // Add assistant message
+            // 2. Add assistant message ONLY AFTER actions complete
             const assistantMessage: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
@@ -112,32 +148,14 @@ export function AssistantPanel() {
             };
 
             setMessages((prev) => [...prev, assistantMessage]);
-
-            // ⚡⚡⚡ CRITICAL: Execute actions ⚡⚡⚡
-            if (data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
-                console.log("⚡⚡⚡ [ASSISTANT] Executing", data.actions.length, "actions");
-
-                for (let i = 0; i < data.actions.length; i++) {
-                    const action = data.actions[i];
-                    console.log(`🎬 [ASSISTANT] Action ${i + 1}/${data.actions.length}:`, action);
-
-                    await executeAction(action);
-                }
-
-                console.log("✅ [ASSISTANT] All actions executed");
-            } else {
-                console.warn("⚠️ [ASSISTANT] No actions to execute. Response:", data);
-            }
         } catch (error: any) {
             console.error("❌ [ASSISTANT] Request failed:", error);
-
             const errorMessage: Message = {
                 id: (Date.now() + 2).toString(),
                 role: "assistant",
                 content: "I encountered an error processing your request.",
                 timestamp: new Date().toISOString(),
             };
-
             setMessages((prev) => [...prev, errorMessage]);
             toast.error("Request failed");
         } finally {
@@ -149,103 +167,133 @@ export function AssistantPanel() {
      * Execute a single action
      */
     const executeAction = async (action: any) => {
+        addLog({
+            type: 'tool',
+            message: `Invoking action: ${action.type}`,
+            details: action
+        });
         console.log("🎬🎬🎬 [ACTION] Executing action:", JSON.stringify(action, null, 2));
 
         const store = useMailStore.getState();
 
         try {
             switch (action.type) {
+                case "set_theme": {
+                    const { theme } = action;
+                    console.log("🌓 [ACTION] Setting theme:", theme);
+                    const settings = useSettingsStore.getState();
+                    settings.updateSettings({ theme });
+                    addLog({
+                        type: 'success',
+                        message: `Theme set to ${theme}`,
+                    });
+                    toast.success(`Theme set to ${theme}`);
+                    break;
+                }
+
+                case "toggle_sidebar": {
+                    console.log("↔️ [ACTION] Toggling sidebar");
+                    const settings = useSettingsStore.getState();
+                    settings.updateSettings({ isSidebarOpen: !settings.isSidebarOpen });
+                    addLog({
+                        type: 'success',
+                        message: 'Sidebar toggled',
+                    });
+                    break;
+                }
+
+                case "ui_navigate": {
+                    const { view, threadId } = action;
+                    console.log("📍 [ACTION] Navigating to:", view, threadId);
+                    if (view === 'settings') {
+                        store.setView('settings');
+                    } else if (view === 'compose') {
+                        store.openCompose();
+                    } else if (view === 'detail' && threadId) {
+                        store.setSelectedThread(threadId);
+                    } else if (['inbox', 'sent', 'archive'].includes(view)) {
+                        store.setFolder(view === 'archive' ? 'trash' : view);
+                    }
+                    addLog({
+                        type: 'success',
+                        message: `Navigated to ${view}${threadId ? ': ' + threadId : ''}`,
+                    });
+                    break;
+                }
+
                 case "TOGGLE": {
                     console.log("🔘 [ACTION] Toggle operation:", action.operationId);
-                    await uiRegistry.execute(action.operationId, action.args || action);
-                    toast.success("Done");
+                    const op = uiRegistry.getOperation(action.id);
+                    if (op) {
+                        const res = await fetch(op.endpoint, {
+                            method: op.method,
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(action.params)
+                        });
+                        const result = await res.json();
+                        toast.success("Done");
+                        return result;
+                    }
+                    toast.error("Operation not found: " + action.id);
                     break;
                 }
 
                 case "NAVIGATE": {
                     console.log("🧭 [ACTION] Navigate to:", action.view || action.operationId);
-
                     const viewMap: Record<string, any> = {
                         navigate_inbox: "inbox",
                         navigate_sent: "sent",
                         navigate_starred: "starred",
                         navigate_drafts: "drafts",
                     };
-
                     const targetView = action.view || viewMap[action.operationId] || "inbox";
-
                     store.setFolder(targetView);
                     toast.success(`Switched to ${targetView}`);
-                    console.log("✅ [ACTION] Navigation complete");
                     break;
                 }
 
                 case "SEARCH": {
                     console.log("🔍 [ACTION] Searching with query:", action.query);
-
                     if (!action.query || action.query === "undefined") {
-                        console.error("❌ [ACTION] Invalid search query");
                         toast.error("Invalid search query");
                         return;
                     }
-
                     toast.loading("Searching...", { id: "search" });
-
                     const results = await store.searchEmails(action.query);
-
-                    toast.success(`Found ${results.length} ${results.length === 1 ? "email" : "emails"}`, {
-                        id: "search",
-                    });
-
-                    console.log("✅ [ACTION] Search complete:", results.length, "results");
+                    toast.success(`Found ${results.length} results`, { id: "search" });
                     break;
                 }
 
                 case "OPEN_THREAD": {
                     console.log("📧 [ACTION] Opening thread:", action.threadId);
-
                     if (!action.threadId) {
-                        console.error("❌ [ACTION] No threadId provided");
                         toast.error("No email ID provided");
                         return;
                     }
-
                     const thread = store.emails.find((e: any) => e.id === action.threadId);
-
                     if (thread) {
                         store.setCurrentThread(thread);
                         toast.success("Email opened");
-                        console.log("✅ [ACTION] Thread opened");
                     } else {
-                        console.error("❌ [ACTION] Thread not found:", action.threadId);
                         toast.error("Email not found");
                     }
                     break;
                 }
 
                 case "OPEN_COMPOSE": {
-                    console.log("✉️ [ACTION] Opening compose:", {
-                        to: action.to,
-                        subjectLength: action.subject?.length || 0,
-                        bodyLength: action.body?.length || 0,
-                    });
-
+                    console.log("✉️ [ACTION] Opening compose:", action.to);
                     store.openCompose({
                         to: action.to || "",
                         subject: action.subject || "",
                         body: action.body || "",
                         threadId: action.threadId,
                     });
-
                     toast.success("Compose opened");
-                    console.log("✅ [ACTION] Compose opened");
                     break;
                 }
 
                 case "FILTER": {
                     console.log("🔎 [ACTION] Applying filter:", action.operationId);
-
-                    // Apply specific filter based on operationId
                     if (action.operationId === "filter_unread") {
                         store.setActiveFilter({ label: "Unread", query: "is:unread" });
                         toast.success("Showing unread only");
@@ -253,53 +301,64 @@ export function AssistantPanel() {
                         store.setActiveFilter({ label: "Starred", query: "is:starred" });
                         toast.success("Showing starred only");
                     }
-
-                    console.log("✅ [ACTION] Filter applied");
                     break;
                 }
 
-                case "EXECUTE_JS": {
-                    console.log("⚡ [ACTION] Executing God Mode JS");
+                case "generate_workflow": {
+                    const { code, workflow_name } = action.input || action;
+                    console.log(`⚙️ [ACTION] Executing Workflow: ${workflow_name}`);
+
                     try {
-                        const AsyncFunction = Object.getPrototypeOf(async function () { }).constructor;
-                        const execFunc = new AsyncFunction(
-                            "uiRegistry",
-                            "store",
-                            "document",
-                            "window",
-                            "console",
-                            action.code
-                        );
-                        await execFunc(uiRegistry, store, document, window, console);
-                        toast.success("JS Executed");
-                    } catch (err: any) {
-                        console.error("❌ [ACTION] JS Execution failed:", err);
-                        toast.error(`JS Error: ${err.message}`);
+                        const sdk = createNeuromailSDK();
+                        addLog({
+                            type: 'info',
+                            message: `Fetching data for workflow: ${workflow_name}...`
+                        });
+                        await executeAiWorkflow(code, sdk);
+
+                        toast.success(`Workflow "${workflow_name}" completed.`);
+                        addLog({
+                            type: 'success',
+                            message: `Workflow "${workflow_name}" executed successfully.`
+                        });
+                    } catch (e: any) {
+                        console.error("❌ Workflow Failed:", e);
+                        toast.error(`Workflow Failed: ${e.message}`);
+                        addLog({
+                            type: 'error',
+                            message: `Workflow "${workflow_name}" failed: ${e.message}`
+                        });
                     }
                     break;
                 }
 
                 case "REGISTER_TOOL": {
-                    console.log("🛠️ [ACTION] Registering autonomous tool:", action.toolId);
+                    const { toolId, toolDescription, toolJsCode, toolParameters } = action;
+                    console.log("🛠️ [ACTION] Registering autonomous tool:", toolId);
+
                     const func: any = {
                         id: `autonomous_${Date.now()}`,
-                        name: action.toolId,
-                        description: action.toolDescription,
-                        code: action.toolJsCode,
-                        parameters: action.toolParameters || [],
+                        name: toolId,
+                        description: toolDescription,
+                        code: toolJsCode,
+                        parameters: toolParameters || [],
                         createdAt: new Date().toISOString(),
                         usageCount: 0,
                     };
+
                     functionComposer.registerComposedFunction(func);
                     await functionComposer.saveToStorage();
-                    toast.success(`Tool '${action.toolId}' registered`);
+
+                    toast.success(`Skill Acquired: ${toolId}`, {
+                        description: `Capability: ${toolDescription}`,
+                        duration: 5000,
+                        icon: "💡"
+                    });
                     break;
                 }
 
                 case "ACTION": {
                     console.log("⚙️ [ACTION] Generic action:", action.operationId);
-
-                    // Handle specific actions
                     if (action.operationId === "refresh_inbox") {
                         toast.loading("Refreshing...", { id: "refresh" });
                         await store.fetchThreads();
@@ -311,34 +370,33 @@ export function AssistantPanel() {
                         store.setCurrentThread(null);
                         toast.success("Email closed");
                     }
-
-                    console.log("✅ [ACTION] Action complete");
                     break;
                 }
 
                 case "UI_OPERATION": {
                     console.log("🔧 [ACTION] Executing UI operation via registry:", action.operationId);
-                    const success = await uiRegistry.execute(action.operationId, action.args || action);
-                    if (success) {
-                        toast.success("Done");
+                    const op = uiRegistry.getOperation(action.operationId);
+                    if (op) {
+                        const res = await fetch(op.endpoint, {
+                            method: op.method,
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(action.args || action)
+                        });
+                        if (res.ok) {
+                            toast.success("Done");
+                        } else {
+                            toast.error("Operation failed");
+                        }
                     } else {
                         toast.error("Operation not found: " + action.operationId);
                     }
                     break;
                 }
 
-                case "MODAL": {
-                    console.log("🪟 [ACTION] Modal operation:", action.operationId);
-                    toast.success("Done");
-                    break;
-                }
-
                 case "FUNCTION_CREATED": {
                     console.log("✨ [ACTION] Function created:", action.functionName);
-
                     if (action.functionDefinition) {
                         try {
-                            // Register and save on client
                             functionComposer.registerComposedFunction(action.functionDefinition);
                             await functionComposer.saveToStorage();
                             toast.success(`Created function: ${action.functionName}`);
@@ -354,28 +412,61 @@ export function AssistantPanel() {
 
                 case "FUNCTION_DELETED": {
                     console.log("🗑️ [ACTION] Function deleted");
-                    toast.success("Function deleted");
-                    // Refetch/reload if needed, but local composer should already be updated by delete tool if we ran it on client...
-                    // Wait, deleteFunction tool ran on server? 
-                    // If deleteFunction ran on server, it deleted from server memory.
-                    // We need to delete from client memory too.
-                    // The action payload doesn't have the ID, just success.
-                    // Actually, let's just create a deleteFunction tool for client side execution?
-                    // Or simply reload?
-                    // For now, let's assume the server told us it's deleted, but we need to delete it locally.
-                    // The server "deleteFunction" tool doesn't know client storage.
-                    // It seems "deleteFunction" should ALSO be a client-side action?
-                    // The orchestrator `executeToolCall` for `deleteFunction` returns `{ action: "FUNCTION_DELETED" }`.
-                    // But it doesn't pass the name back clearly for us to delete locally if it wasn't in the arguments?
-                    // `action` object spreads `...toolCall.arguments`, so `name` should be there.
-
                     if (action.name) {
                         const func = functionComposer.getFunctionByName(action.name);
                         if (func) {
                             functionComposer.deleteFunction(func.id);
                             await functionComposer.saveToStorage();
+                            toast.success("Function deleted");
                         }
                     }
+                    break;
+                }
+
+                case "QUERY_DOM": {
+                    console.log("🔍 [ACTION] Querying DOM:", action.action, action.selector);
+                    let result;
+                    if (action.action === "structure") {
+                        result = DOMQueryEngine.getPageStructure();
+                    } else if (action.action === "find") {
+                        result = DOMQueryEngine.findElements(action.selector || "*");
+                    } else {
+                        result = { error: "Unknown query action" };
+                    }
+
+                    // Send feedback to AI
+                    const feedback = `DOM Query Result (${action.action}): ${JSON.stringify(result, null, 2)}`;
+                    console.log("📡 [ASSISTANT] Sending DOM query feedback back to AI");
+
+                    // Simulate a silent turn by calling a internal handler or just toast for now
+                    // In a production app, we would use a proper chat feedback loop
+                    toast.success("DOM Query Complete", {
+                        description: `Found ${Array.isArray(result) ? result.length : "page structure"}`
+                    });
+
+                    // OPTIONAL: Self-correction/Feedback loop
+                    // We can append this to the chat as a system-like message
+                    const systemMessage: Message = {
+                        id: Date.now().toString(),
+                        role: "assistant",
+                        content: `Introspection Result: ${feedback.substring(0, 100)}...`,
+                        timestamp: new Date().toISOString()
+                    };
+                    setMessages(prev => [...prev, systemMessage]);
+                    break;
+                }
+
+                case "EXECUTE_PLAN": {
+                    console.log("📜 [ACTION] Executing AI Plan");
+                    const { plan } = action; // Expects AIPlan object
+                    if (!plan) {
+                        toast.error("Missing AI Plan");
+                        return;
+                    }
+
+                    // Import dynamically or use the imported instance
+                    const { executionEngine: engine } = await import("@/agent/sandbox/executor");
+                    await engine.executePlan(plan);
                     break;
                 }
 
@@ -396,7 +487,7 @@ export function AssistantPanel() {
                 <div className="flex items-center justify-between">
                     <div>
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">AI Copilot</h2>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Running on local AI</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">Assistant Persona: Software Engineer</p>
                     </div>
                 </div>
             </div>
@@ -415,28 +506,46 @@ export function AssistantPanel() {
                             <div
                                 className={`max-w-[80%] rounded-lg px-4 py-2 ${message.role === "user"
                                     ? "bg-blue-500 text-white"
-                                    : "bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700"
+                                    : "bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700 shadow-sm"
                                     }`}
                             >
-                                <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                                <p className="text-sm border-0 bg-transparent focus:ring-0 whitespace-pre-wrap">{message.content}</p>
                             </div>
                         </motion.div>
                     ))}
                 </AnimatePresence>
-
                 {isLoading && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         className="flex justify-start"
                     >
-                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2">
+                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-2 shadow-sm">
                             <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
                         </div>
                     </motion.div>
                 )}
-
                 <div ref={messagesEndRef} />
+            </div>
+
+            {/* Neural Trace Toggle & Panel */}
+            <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                <button
+                    onClick={() => setShowLogger(!showLogger)}
+                    type="button"
+                    className="w-full flex items-center justify-between px-4 py-2 text-[10px] font-bold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors uppercase tracking-widest"
+                >
+                    <div className="flex items-center gap-2">
+                        <Terminal className="w-3 h-3" />
+                        <span>Neural Trace Log</span>
+                    </div>
+                    {showLogger ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
+                </button>
+                {showLogger && (
+                    <div className="h-48 px-2 pb-2">
+                        <UILogger />
+                    </div>
+                )}
             </div>
 
             {/* Input */}
@@ -459,6 +568,9 @@ export function AssistantPanel() {
                     </button>
                 </form>
             </div>
+
+            {/* AI Change History Panel */}
+            <AIChangesPanel />
         </div>
     );
 }

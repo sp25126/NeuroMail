@@ -23,7 +23,7 @@ export class ToolRegistry {
     private registerBuiltInTools() {
         this.registerTool({
             id: "mail.compose",
-            name: "compose_email",
+            name: "composeEmail",
             description: "Open compose form and fill with recipients, subject, and body",
             parameters: [
                 { name: "to", type: "string", description: "Recipient email", required: true },
@@ -44,7 +44,7 @@ export class ToolRegistry {
 
         this.registerTool({
             id: "mail.search",
-            name: "search_emails",
+            name: "searchEmails",
             description: "Search emails and update inbox view with results",
             parameters: [
                 { name: "query", type: "string", description: "Gmail-style search query", required: true },
@@ -63,7 +63,7 @@ export class ToolRegistry {
 
         this.registerTool({
             id: "navigation.open_thread",
-            name: "open_thread",
+            name: "openThread",
             description: "Navigate to and display a specific email thread",
             parameters: [
                 { name: "threadId", type: "string", description: "Thread ID to open", required: true },
@@ -80,7 +80,7 @@ export class ToolRegistry {
 
         this.registerTool({
             id: "filter.apply",
-            name: "apply_filters",
+            name: "applyFilters",
             description: "Apply filters to the inbox view",
             parameters: [
                 { name: "unreadOnly", type: "boolean", description: "Show only unread", required: false },
@@ -129,6 +129,65 @@ export class ToolRegistry {
             permissions: ["ui.compose"],
         }, async (args: any, context: any) => {
             return await functionComposer.composeFunction({ ...args, userId: context.appState.userId });
+        });
+
+        this.registerTool({
+            id: "mail.reply",
+            name: "replyToEmail",
+            description: "Reply to the currently open email thread",
+            parameters: [
+                { name: "body", type: "string", description: "Reply content", required: true },
+            ],
+            returnType: "ComposeState",
+            category: "mail",
+            permissions: ["mail.compose"],
+        }, async (args: any, context: any) => {
+            if (!context.appState.currentThreadId && !context.currentThread) {
+                throw new Error("No thread currently open to reply to");
+            }
+            return {
+                action: "OPEN_REPLY",
+                data: {
+                    ...args,
+                    threadId: context.appState.currentThreadId || context.currentThread?.id,
+                    subject: context.currentThread?.subject ? `Re: ${context.currentThread.subject}` : "Re: (no subject)",
+                    to: context.currentThread?.participants?.[0] || ""
+                },
+            };
+        });
+
+        this.registerTool({
+            id: "ui.execute_js",
+            name: "execute_js",
+            description: "Execute JavaScript code to manipulate the UI or DOM",
+            parameters: [
+                { name: "code", type: "string", description: "JavaScript code to execute", required: true },
+            ],
+            returnType: "void",
+            category: "system",
+            permissions: ["ui.execute"],
+        }, async (args: any, context: any) => {
+            return {
+                action: "EXECUTE_JS",
+                data: { code: args.code },
+            };
+        });
+
+        this.registerTool({
+            id: "mail.summarize",
+            name: "summarizeEmail",
+            description: "Generate an AI summary of the current email thread",
+            parameters: [
+                { name: "threadId", type: "string", description: "Thread ID to summarize", required: true },
+            ],
+            returnType: "string",
+            category: "mail",
+            permissions: ["mail.read"],
+        }, async (args: any, context: any) => {
+            return {
+                action: "SUMMARIZE",
+                data: args,
+            };
         });
 
         logger.info("Built-in tools registered", {

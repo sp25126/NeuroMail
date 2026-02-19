@@ -8,7 +8,8 @@ const OLLAMA_BASE = "http://localhost:11434";
  */
 export async function callOllama(
     req: LLMRequest,
-    model: string = "gemma2:2b"
+    model: string = "gemma2:2b",
+    baseUrl: string = process.env.NEXT_PUBLIC_OLLAMA_BASE_URL || "http://localhost:11434"
 ): Promise<LLMResponse> {
     const start = Date.now();
 
@@ -18,7 +19,7 @@ export async function callOllama(
     }
     messages.push({ role: "user", content: req.userPrompt });
 
-    const response = await fetch(`${OLLAMA_BASE}/api/chat`, {
+    const response = await fetch(`${baseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

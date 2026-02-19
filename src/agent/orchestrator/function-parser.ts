@@ -1,4 +1,4 @@
-import { ToolCall } from "../tools/definitions";
+import { ToolCall } from "../tools/tools-definitions";
 
 /**
  * Parse function calls from AI response text
@@ -106,15 +106,19 @@ export class FunctionCallParser {
         const calls: ToolCall[] = [];
         const seenCalls = new Set<string>();
 
-        // STEP 1: Aggressive cleaning of text from code blocks, prefixes, and quote markers
+        // STEP 1: Aggressive cleaning of text from code blocks, prefixes, and common chatters
         let cleanText = text
-            .replace(/```\w*\n?|```/g, "") // Remove code block markers
-            .replace(/^(You|AI|Assistant|Assistant:):\s*/gim, "") // Remove conversational prefixes
-            .replace(/^>\s*/gm, "") // Remove quote markers
-            .replace(/\n\n+/g, "\n") // Collapse multiple newlines
+            // Strip common "Sure!", "Here is the code", etc.
+            .replace(/^(Sure|Okay|Alright|Here's|Here is|Certainly|I've|I have|Ready|Done|Understood|Processing)[^.!?]*[.!?]\s*/gi, '')
+            .replace(/^(I will|Let me|I'm|I am|The|Executing)[^.!?]*[.!?]\s*/gi, '')
+            // Strip markdown code block markers but KEEP the content
+            .replace(/```[a-z]*\n?|```/gi, "")
+            .replace(/^(You|AI|Assistant|Assistant:):\s*/gim, "")
+            .replace(/^>\s*/gm, "")
+            .replace(/\n\n+/g, "\n")
             .trim();
 
-        console.log("🧹 [PARSER] Cleaned text for explicit calls:", cleanText.substring(0, 100));
+        console.log("🧹 [PARSER] Cleaned text for explicit calls:", cleanText.substring(0, 150));
 
         for (const toolName of availableTools) {
             // Find all occurrences of toolName(
@@ -233,16 +237,39 @@ export class FunctionCallParser {
      */
     private static parseArguments(argsString: string): Record<string, any> {
         const args: Record<string, any> = {};
+        let hasNamedArgs = false;
 
         if (!argsString.trim()) return args;
 
-        // Try JSON parse first with newline sanitization
+        // Try JSON parse first with cleanup
         try {
-            // Escape newlines in strings to valid JSON format
-            const sanitized = argsString.replace(/\n/g, "\\n");
+            // Aggressively clean up argsString for JSON
+            const sanitized = argsString.trim()
+                .replace(/\n/g, "\\n")
+                // Convert common unquoted keys or single-quoted keys to double-quoted keys
+                .replace(/([{,]\s*)([a-zA-Z0-9_]+)(\s*:)/g, '$1"$2"$3') // { key: -> {"key":
+                .replace(/([{,]\s*)'([a-zA-Z0-9_]+)'(\s*:)/g, '$1"$2"$3') // { 'key': -> {"key":
+                // Convert single quoted values to double quoted (carefully)
+                .replace(/:\s*'((?:[^'\\]|\\.)*)'/g, ': "$1"')
+                .replace(/,\s*}/g, '}') // Remove trailing commas
+
+            // If it looks like a complete JSON object, parse it directly
+            if (sanitized.startsWith("{") && sanitized.endsWith("}")) {
+                try {
+                    return JSON.parse(sanitized);
+                } catch (e) {
+                    // Try to fix common unquoted JSON issues
+                    const fixed = sanitized
+                        .replace(/([{,]\s*)([a-zA-Z0-9_]+)(\s*:)/g, '$1"$2"$3')
+                        .replace(/'/g, '"');
+                    return JSON.parse(fixed);
+                }
+            }
+
+            // Try wrapping it if it looks like key:value pairs
             return JSON.parse(`{${sanitized}}`);
-        } catch {
-            // Fall back to robust regex parsing
+        } catch (e) {
+            console.log("⚠️ [PARSER] JSON parse failed, falling back to regex. Error:", e instanceof Error ? e.message : String(e));
         }
 
         // Regex to match key:value pairs, respecting quotes
@@ -265,6 +292,43 @@ export class FunctionCallParser {
             }
 
             args[key] = value;
+            hasNamedArgs = true;
+        }
+
+        // If no named args found, try parsing as positional arguments
+        if (!hasNamedArgs) {
+            // Extract values separated by commas, respecting quotes
+            const positionalValues = argsString.match(/"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([^,{}]+)/g);
+
+            if (positionalValues) {
+                const cleanValues = positionalValues.map(v => {
+                    const trimmed = v.trim();
+                    // Strip quotes if they exist
+                    if ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+                        (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+                        return trimmed.substring(1, trimmed.length - 1);
+                    }
+                    return trimmed;
+                });
+
+                if (cleanValues.length > 0) {
+                    console.log("🧩 [PARSER] Positional arguments detected:", cleanValues);
+
+                    // HEURISTIC MAPPING:
+                    // 1. If 1 arg, map to common names
+                    if (cleanValues.length === 1) {
+                        args.code = cleanValues[0]; // execute_js
+                        args.value = cleanValues[0]; // search
+                        args.query = cleanValues[0]; // search
+                    }
+                    // 2. If 3 args, likely sendEmail(to, subject, body)
+                    else if (cleanValues.length === 3) {
+                        args.to = cleanValues[0];
+                        args.subject = cleanValues[1];
+                        args.body = cleanValues[2];
+                    }
+                }
+            }
         }
 
         return args;

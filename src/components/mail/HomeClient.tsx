@@ -177,7 +177,6 @@ export function HomeClient({ defaultProvider = "Local AI" }: HomeClientProps) {
                 isOpen={isCopilotOpen}
                 onClose={() => setIsCopilotOpen(false)}
                 context={threadContext}
-                providerName={defaultProvider}
             />
 
             <ComposeModal />

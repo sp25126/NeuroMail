@@ -3,13 +3,45 @@
 import { useEffect } from "react";
 import { uiRegistry } from "@/lib/ui-registry";
 import { useMailStore } from "@/store/useMailStore";
+import { useUIStore } from "@/store/uiStore";
 import { useRouter } from "next/navigation";
 import { functionComposer } from "@/agent/function-composer";
 import { useSettingsStore } from "@/store/useSettingsStore";
+import { useAIChangesStore } from "@/store/useAIChangesStore";
 
 export function UIOperationsProvider({ children }: { children: React.ReactNode }) {
     const store = useMailStore();
     const router = useRouter();
+
+    // Re-apply persistent AI changes on mount
+    useEffect(() => {
+        const { persistAIChanges } = useSettingsStore.getState();
+        if (persistAIChanges) {
+            const changes = useAIChangesStore.getState().changes;
+            console.log("🔄 [UI_OPS] Re-applying", changes.length, "persistent AI changes");
+
+            changes.forEach(change => {
+                try {
+                    console.log(`✨ [UI_OPS] Re-applying change: ${change.id} (${change.type})`);
+                    if (change.type === 'style' || change.type === 'script') {
+                        // For generic scripts, we re-run them
+                        const AsyncFunction = Object.getPrototypeOf(async function () { }).constructor;
+                        const execFunc = new AsyncFunction(
+                            "uiRegistry",
+                            "store",
+                            "document",
+                            "window",
+                            "console",
+                            change.value
+                        );
+                        execFunc(uiRegistry, useMailStore.getState(), document, window, console);
+                    }
+                } catch (e) {
+                    console.error("❌ [UI_OPS] Failed to re-apply change:", change.id, e);
+                }
+            });
+        }
+    }, []);
 
     useEffect(() => {
         console.log("📋 [UI_OPS] Registering COMPLETE UI operations...");
@@ -190,7 +222,7 @@ export function UIOperationsProvider({ children }: { children: React.ReactNode }
                 if (store.clearSearch) {
                     store.clearSearch();
                 } else {
-                    store.setSearchQuery("");
+                    useUIStore.getState().setSearchCommand({ query: "", timestamp: Date.now() });
                 }
             },
             metadata: { category: "search" },

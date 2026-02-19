@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, afterEach } from "vitest";
+import { beforeAll, afterAll, afterEach, vi } from "vitest";
 import { runMigrations } from "@/lib/db/migrate";
 import { initDb, db } from "@/lib/db";
 

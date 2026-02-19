@@ -223,17 +223,19 @@ export function ThreadDetail({ onBack }: { onBack?: () => void }) {
             >
                 <div className="flex items-center gap-3">
                     <motion.button
+                        id="thread-back"
                         onClick={onBack}
                         whileHover={{ scale: 1.1 }}
                         whileTap={{ scale: 0.9 }}
                     >
                         <X size={18} />
                     </motion.button>
-                    <motion.button whileHover={{ scale: 1.1, rotate: 5 }} whileTap={{ scale: 0.9 }} className="p-2 hover:bg-white/10 rounded-full transition-colors"><Archive size={18} /></motion.button>
-                    <motion.button whileHover={{ scale: 1.1, rotate: -5 }} whileTap={{ scale: 0.9 }} className="p-2 hover:bg-white/10 rounded-full text-destructive transition-colors"><Trash2 size={18} /></motion.button>
+                    <motion.button id="thread-archive" whileHover={{ scale: 1.1, rotate: 5 }} whileTap={{ scale: 0.9 }} className="p-2 hover:bg-white/10 rounded-full transition-colors"><Archive size={18} /></motion.button>
+                    <motion.button id="thread-trash" whileHover={{ scale: 1.1, rotate: -5 }} whileTap={{ scale: 0.9 }} className="p-2 hover:bg-white/10 rounded-full text-destructive transition-colors"><Trash2 size={18} /></motion.button>
                 </div>
                 <div className="flex items-center gap-3">
                     <motion.button
+                        id="thread-summarize"
                         layout
                         onClick={handleSummarize}
                         disabled={isSummarizing}
@@ -326,11 +328,13 @@ export function ThreadDetail({ onBack }: { onBack?: () => void }) {
                 <div className="flex items-center gap-2 border border-white/10 rounded-xl px-4 py-2 focus-within:ring-1 ring-primary/50 transition-all bg-white/5 hover:bg-white/10">
                     <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }} className="p-2 text-muted-foreground hover:text-foreground transition-colors"><Paperclip size={18} /></motion.button>
                     <input
+                        id="reply-input"
                         type="text"
                         placeholder="Type a neural reply..."
                         className="flex-1 bg-transparent border-none focus:ring-0 text-sm py-2 min-w-0 placeholder:text-muted-foreground/50"
                     />
                     <motion.button
+                        id="reply-send"
                         whileHover={{ scale: 1.05, backgroundColor: "rgba(var(--primary)/0.9)" }}
                         whileTap={{ scale: 0.95 }}
                         className="bg-primary hover:bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(var(--primary)/0.4)]"

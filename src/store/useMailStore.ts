@@ -120,9 +120,44 @@ export const useMailStore = create<MailState>((set, get) => ({
         get().fetchThreads();
     },
     sendEmail: async () => {
-        console.log("📨 [STORE] Sending email...");
-        // Mock send
-        set({ isComposeOpen: false, composeDraft: { to: '', subject: '', body: '' } });
+        const { composeDraft } = get();
+        console.log("📨 [STORE] Sending email...", composeDraft);
+
+        if (!composeDraft.to) {
+            console.error("❌ [STORE] Missing recipient");
+            return;
+        }
+
+        try {
+            const res = await fetch("/api/mail/send", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(composeDraft),
+            });
+
+            if (!res.ok) {
+                const errorData = await res.json();
+                throw new Error(errorData.error || "Failed to send email");
+            }
+
+            const data = await res.json();
+            console.log("✅ [STORE] Email sent successfully:", data.messageId);
+
+            // Clear draft and close compose
+            set({
+                isComposeOpen: false,
+                composeDraft: { to: '', subject: '', body: '' }
+            });
+
+            // Refresh sent folder if we are there, or just general refresh
+            get().refreshThreads();
+
+        } catch (error: any) {
+            console.error("❌ [STORE] Send failed:", error);
+            // We might want to expose this error state to the UI
+            set({ error: error.message });
+            throw error; // Re-throw so caller knows it failed
+        }
     },
     starThread: async (id) => {
         console.log("⭐ [STORE] Star thread:", id);

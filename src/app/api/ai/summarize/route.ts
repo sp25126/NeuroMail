@@ -1,10 +1,10 @@
-import { generateLLMResponse, getLLMConfig } from "@/lib/llm"
+import { generateLLMResponse, getLLMConfig } from "@/agent/llm"
 import { handleApi } from "@/lib/api-handler"
 
 export async function POST(req: Request) {
     return handleApi({ route: "POST /api/ai/summarize", requireAuth: true }, async (ctx) => {
         const { messages } = await req.json()
-        const llmConfig = getLLMConfig(ctx.userEmail);
+        const llmConfig = await getLLMConfig(ctx.userEmail);
 
         if (!messages || !Array.isArray(messages)) {
             const error = new Error("Messages are required");

@@ -3,6 +3,33 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["ai", "@ai-sdk/openai", "@ai-sdk/provider", "@ai-sdk/provider-utils", "@ai-sdk/gateway"],
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      // Tell webpack to NOT bundle these Node.js-only packages on the client
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        path: false,
+        os: false,
+        crypto: false,
+        stream: false,
+        buffer: false,
+        child_process: false,
+      };
+
+      // Mark better-sqlite3 as external (server-only)
+      config.externals = [
+        ...(Array.isArray(config.externals) ? config.externals : []),
+        ({ request }: { request: string }, callback: Function) => {
+          if (request === 'better-sqlite3' || request === 'bindings') {
+            return callback(null, 'commonjs ' + request);
+          }
+          callback();
+        },
+      ];
+    }
+    return config;
+  },
 };
 
 export default withSentryConfig(nextConfig, {

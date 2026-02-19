@@ -1,5 +1,5 @@
 import { BaseLLMProvider, LLMMessage, LLMStreamChunk } from "./base";
-import { LLMConfig } from "../../types";
+import { LLMConfig } from "../types";
 
 export class OllamaProvider extends BaseLLMProvider {
     private baseUrl: string;
@@ -18,24 +18,54 @@ export class OllamaProvider extends BaseLLMProvider {
         });
 
         try {
+            // Set a generous timeout (10 minutes) for slow CPU generation
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 600000);
+
             const response = await fetch(`${this.baseUrl}/api/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: controller.signal,
                 body: JSON.stringify({
                     model: this.config.model,
                     messages: this.convertMessages(messages),
                     stream: false,
                     options: {
                         temperature: options?.temperature ?? this.config.temperature,
-                        num_predict: options?.maxTokens ?? this.config.maxTokens,
+                        num_predict: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 1024, 2048),
+                        num_ctx: 4096, // Limit context window for CPU performance
                     },
-                    tools: options?.tools ? this.convertTools(options.tools) : undefined,
+                    tools: options?.tools || undefined,
                 }),
             });
 
+            clearTimeout(timeoutId);
+
             if (!response.ok) {
-                const error = await response.text();
-                throw new Error(`Ollama API error: ${response.status} - ${error}`);
+                const errorText = await response.text();
+
+                // Fallback for models that don't support native tools
+                if (response.status === 400 && errorText.includes("does not support tools") && options?.tools) {
+                    console.warn(`⚠️ [OLLAMA] Model ${this.config.model} does not support native tools. Retrying without tools...`);
+                    return this._generateImpl(messages, { ...options, tools: undefined });
+                }
+
+                // Fallback for missing models (404)
+                if (response.status === 404 && this.config.model !== "llama3.2:latest") {
+                    console.warn(`⚠️ [OLLAMA] Model ${this.config.model} not found. Falling back...`);
+                    const originalModel = this.config.model;
+                    this.config.model = "llama3.2:latest";
+                    try {
+                        const result = await this._generateImpl(messages, options);
+                        this.config.model = originalModel; // Restore
+                        return result;
+                    } catch (e) {
+                        this.config.model = originalModel;
+                        throw e;
+                    }
+                }
+
+                throw new Error(`Ollama API error: ${response.status} - ${errorText}`);
             }
 
             const data = await response.json();
@@ -67,23 +97,54 @@ export class OllamaProvider extends BaseLLMProvider {
         });
 
         try {
+            // Set a generous timeout (10 minutes) for slow CPU generation
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 600000);
+
             const response = await fetch(`${this.baseUrl}/api/chat`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
+                signal: controller.signal,
                 body: JSON.stringify({
                     model: this.config.model,
                     messages: this.convertMessages(messages),
                     stream: true,
                     options: {
                         temperature: options?.temperature ?? this.config.temperature,
-                        num_predict: options?.maxTokens ?? this.config.maxTokens,
+                        num_predict: Math.min(options?.maxTokens ?? this.config.maxTokens ?? 1024, 2048),
+                        num_ctx: 4096, // Limit context window for CPU performance
                     },
-                    tools: options?.tools ? this.convertTools(options.tools) : undefined,
+                    tools: options?.tools || undefined,
                 }),
             });
 
+            clearTimeout(timeoutId);
+
             if (!response.ok) {
-                throw new Error(`Ollama API error: ${response.status}`);
+                const errorText = await response.text();
+
+                // Fallback for models that don't support native tools
+                if (response.status === 400 && errorText.includes("does not support tools") && options?.tools) {
+                    console.warn(`⚠️ [OLLAMA] Model ${this.config.model} does not support native tools in stream. Retrying without tools...`);
+                    yield* this._generateStreamImpl(messages, { ...options, tools: undefined });
+                    return;
+                }
+
+                // Fallback for missing models (404)
+                if (response.status === 404 && this.config.model !== "llama3.2:latest") {
+                    console.warn(`⚠️ [OLLAMA] Model ${this.config.model} not found in stream. Falling back to llama3.2:latest...`);
+                    const originalModel = this.config.model;
+                    this.config.model = "llama3.2:latest";
+                    try {
+                        yield* this._generateStreamImpl(messages, options);
+                        return;
+                    } catch (e) {
+                        this.config.model = originalModel;
+                        throw e;
+                    }
+                }
+
+                throw new Error(`Ollama API error: ${response.status} - ${errorText}`);
             }
 
             if (!response.body) {
@@ -165,26 +226,27 @@ export class OllamaProvider extends BaseLLMProvider {
     }
 
     private convertTools(tools: any[]): any[] {
-        return tools.map((tool) => ({
-            type: "function",
-            function: {
-                name: tool.name,
-                description: tool.description,
-                parameters: {
-                    type: "object",
-                    properties: tool.parameters.reduce((acc: any, param: any) => {
-                        acc[param.name] = {
-                            type: param.type,
-                            description: param.description,
-                            enum: param.enum,
-                        };
-                        return acc;
-                    }, {}),
-                    required: tool.parameters
-                        .filter((p: any) => p.required)
-                        .map((p: any) => p.name),
+        return tools.map((tool) => {
+            // Already in OpenAI-style format?
+            if (tool.type === "function") return tool;
+
+            // Handle dynamic/static tool objects from our registry/definitions
+            return {
+                type: "function",
+                function: {
+                    name: tool.id || tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters?.properties ? {
+                        type: "object",
+                        properties: tool.parameters.properties,
+                        required: tool.parameters.required || [],
+                    } : {
+                        type: "object",
+                        properties: {},
+                        required: [],
+                    }
                 },
-            },
-        }));
+            };
+        });
     }
 }

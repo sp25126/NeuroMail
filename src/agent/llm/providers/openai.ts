@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { BaseLLMProvider, LLMMessage, LLMStreamChunk } from "./base";
-import { LLMConfig } from "../../types";
+import { LLMConfig } from "../types";
 
 export class OpenAIProvider extends BaseLLMProvider {
     private client: OpenAI;

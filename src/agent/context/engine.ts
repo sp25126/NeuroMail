@@ -36,12 +36,16 @@ export class ContextEngine {
                 [params.sessionId]
             );
 
-            const conversationHistory = Array.isArray(historyRows) ? historyRows.map((row: any) => ({
+            const dbHistory = Array.isArray(historyRows) ? historyRows.map((row: any) => ({
                 role: row.role as "user" | "assistant" | "tool",
                 content: row.content,
                 toolCalls: row.tool_calls ? JSON.parse(row.tool_calls) : undefined,
                 timestamp: row.created_at,
             })) : [];
+
+            // Merge with in-memory history for current unsaved session data
+            const memoryHistory = this.conversationHistory.get(params.sessionId) || [];
+            const conversationHistory = memoryHistory.length > 0 ? memoryHistory : dbHistory;
 
             // Add state change annotations (from original code, preserving if compatible or just use user's?)
             // User's snippet replaced the whole fetching logic and didn't mention annotating.

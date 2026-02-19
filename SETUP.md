@@ -1,4 +1,7 @@
-# 🚀 Neuromail Setup Guide
+# 🚀 Neuromail Setup Guide (Prototype)
+
+> [!IMPORTANT]
+> **PROTOTYPE DISCLAIMER**: Neuromail is currently a prototype level implementation. While fully functional for demonstration, it is optimized for developer testing and hiring challenge evaluation.
 
 Complete installation and configuration guide for Neuromail.
 
@@ -133,13 +136,22 @@ npm run db:init
 
 ---
 
-## 6. Ollama Configuration
+## 6. AI Configuration
 
-### Pull Required Model
+Neuromail supports a hybrid AI strategy. You can use local Ollama or a remote Colab GPU.
+
+### Option A: Local Ollama
 ```bash
 ollama serve
 ollama pull gemma2:2b
 ```
+
+### Option B: Colab Brain (Remote T4 GPU)
+1. Open `colab_brain.ipynb` in [Google Colab](https://colab.research.google.com/).
+2. Follow the instructions to start the FastAPI server with `ngrok`.
+3. Copy the tunnel URL (e.g., `https://xxxx.ngrok-free.app`).
+4. Update `OLLAMA_BASE_URL` in `.env.local` to use this URL.
+5. In Neuromail settings, set the provider to **Colab Brain**.
 
 ---
 

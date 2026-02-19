@@ -1,10 +1,11 @@
 <div align="center">
 
-# 🧠 Neuromail
+# 🧠 Neuromail (Prototype)
 
 ### AI-Powered Gmail Client with Total UI Control
+**⚠️ Prototype Level Implementation - Built for Processity Hiring Challenge**
 
-[![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-15-black)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue)](https://www.typescriptlang.org/)
 [![Ollama](https://img.shields.io/badge/Ollama-gemma2:2b-green)](https://ollama.ai/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -17,9 +18,15 @@
 
 ---
 
+## 🎬 Demo
+
+Watch the Neuromail walkthrough: [YouTube Demo Link](https://youtu.be/6axLFUMPTMs?si=bIjJd-RUHiuBdLQb)
+
+---
+
 ## 🎯 Overview
 
-**Neuromail** is a next-generation email client that transforms your inbox into an **executable command center**. Built for the Processity hiring challenge, it goes beyond traditional email management by introducing an AI copilot that can control every aspect of the UI through natural language commands.
+**Neuromail** is a next-generation prototype email client that transforms your inbox into an **executable command center**. Built as a proof-of-concept for the Processity hiring challenge, it goes beyond traditional email management by introducing an AI copilot that can control every aspect of the UI through natural language commands.
 
 ### The Problem
 Modern email management is a cognitive burden. Users spend excessive time sorting, searching, and context-switching between emails.

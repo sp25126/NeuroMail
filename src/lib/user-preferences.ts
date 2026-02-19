@@ -1,3 +1,4 @@
+import 'server-only';
 import { db } from "./db";
 import { LLMConfig } from "@/agent/types";
 import { v4 as uuidv4 } from "uuid";
