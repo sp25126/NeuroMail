@@ -143,13 +143,39 @@ ollama pull gemma2:2b
 
 ---
 
-## 7. Running the Application
+## 7. Running the Monorepo Application
 
-### Development Mode
-```bash
-npm run dev
-```
-Open [http://localhost:3000](http://localhost:3000).
+### Monorepo Services Layout
+Neuromail is structured as a monorepo containing multiple independent services:
+1. **Frontend Dashboard (`apps/web`)**: Next.js dashboard shell running on port `3003`.
+2. **API Backend (`apps/api`)**: FastAPI server running on port `8000`.
+3. **Background Worker (`apps/workers`)**: Python Redis queue processor.
+4. **Shared Types & Constants (`packages/shared`)**: Shared contract schemas.
+
+### Required Infrastructure Services
+Before launching, make sure the local dependencies are up and running:
+- **PostgreSQL**: Ensure PostgreSQL is active. Database URL should be configured in your env file (e.g. `postgresql://user:password@localhost:5432/neuromail`).
+- **Redis**: Background worker queue relies on Redis. Ensure Redis server is active on `redis://localhost:6379`.
+
+### Launching Local Services
+We provide unified npm commands in the root directory:
+
+- **Run all services concurrently**:
+  ```bash
+  npm run dev
+  ```
+- **Start the Next.js frontend only** (on port `3003`):
+  ```bash
+  npm run dev:web
+  ```
+- **Start the API backend only** (on port `8000`):
+  ```bash
+  npm run dev:api
+  ```
+- **Start the worker process only**:
+  ```bash
+  npm run dev:workers
+  ```
 
 ---
 
@@ -157,6 +183,7 @@ Open [http://localhost:3000](http://localhost:3000).
 - **Gmail API not enabled**: Double check the Cloud Console.
 - **Invalid redirect URI**: Ensure `http://localhost:3000/api/auth/callback/google` is added.
 - **Ollama connection refused**: Ensure `ollama serve` is running.
+- **Redis Connection Failure**: Verify Redis is running locally (`redis-cli ping` returns `PONG`).
 
 ---
 
@@ -169,5 +196,5 @@ Open [http://localhost:3000](http://localhost:3000).
 <div align="center">
 Happy coding! 🚀
 
-[← Back to README](file:///c:/Users/saumy/OneDrive/Desktop/task/README.md)
+[← Back to README](README.md)
 </div>

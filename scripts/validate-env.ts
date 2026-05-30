@@ -1,4 +1,9 @@
 import { z } from "zod";
+import pkg from "@next/env";
+const { loadEnvConfig } = pkg;
+
+// Load Next.js environment configuration
+loadEnvConfig(process.cwd());
 
 const envSchema = z.object({
     // Authentication
@@ -33,7 +38,8 @@ function validateEnv() {
     } catch (error) {
         if (error instanceof z.ZodError) {
             console.error("❌ Invalid Environment Variables:");
-            (error as any).errors.forEach((err: z.ZodIssue) => {
+            const issues = error.issues || (error as any).errors || [];
+            issues.forEach((err: z.ZodIssue) => {
                 console.error(`   - ${err.path.join(".")}: ${err.message}`);
             });
             process.exit(1);

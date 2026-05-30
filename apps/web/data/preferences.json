@@ -1,0 +1,12 @@
+[
+  {
+    "id": "cbff37d9-fbed-4f4f-b0cd-9f069fc8c730",
+    "email": "dev@neuromail.local",
+    "persona": "professional",
+    "tone": "default",
+    "length": "medium",
+    "llmProvider": "ollama",
+    "createdAt": "2026-05-29T19:58:19.263Z",
+    "updatedAt": "2026-05-29T19:58:19.263Z"
+  }
+]

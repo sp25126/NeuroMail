@@ -1,11 +1,19 @@
 {
-  "name": "temp_init",
+  "name": "neuromail-monorepo",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/shared"
+  ],
   "scripts": {
-    "dev": "start ollama serve && next dev -p 3003",
-    "prebuild": "ts-node scripts/validate-env.ts",
-    "build": "next build",
+    "dev": "npm run dev:all",
+    "dev:web": "npm run dev -w apps/web",
+    "dev:api": ".venv\\Scripts\\uvicorn --app-dir apps/api main:app --reload --port 8000",
+    "dev:workers": ".venv\\Scripts\\python apps/workers/worker.py",
+    "dev:all": "npx concurrently -p \"[{name}]\" -n \"api,web,worker\" -c \"cyan,magenta,yellow\" \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:workers\"",
+    "prebuild": "npx ts-node scripts/validate-env.ts",
+    "build": "npm run build --workspace=packages/shared && npm run build --workspace=apps/web",
     "start": "next start",
     "lint": "eslint",
     "test": "npx vitest run",
@@ -66,6 +74,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
+    "ts-node": "^10.9.2",
     "typescript": "^5",
     "vitest": "^4.0.18"
   }

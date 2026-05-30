@@ -22,6 +22,16 @@ DEMO - [VIDEO](https://youtu.be/6axLFUMPTMs)
 
 ## 🎯 Overview
 
+### 📂 Monorepo Structure
+Neuromail is structured as a production-grade monorepo to ensure clean domain separation and deployment flexibility:
+* **`apps/web`**: Next.js user interface dashboard application.
+* **`apps/api`**: FastAPI-based backend python service orchestration.
+* **`apps/workers`**: scheduled ingestion and background worker queues.
+* **`apps/mcp`**: Model Context Protocol servers exposing integrations.
+* **`packages/shared`**: shared typescript configurations and common utility libraries.
+* **`infra`**: containerized configurations (docker-compose, postgres, redis).
+* **`docs`**: design specifications, database ERDs, and operational reports.
+
 **Neuromail** is a next-generation email client that transforms your inbox into an **executable command center**. Built for the Processity hiring challenge, it goes beyond traditional email management by introducing an AI copilot that can control every aspect of the UI through natural language commands.
 
 ### The Problem
