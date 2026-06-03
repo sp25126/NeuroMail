@@ -1,0 +1,2 @@
+raw_email_id,subject,from_address,received_at,parsing_error,quarantine_reason
+raw-q-01,Damaged shipment alert,unknown@carrier.com,2026-06-02 17:43:38.682216,No reference match found.,No reference match found.

@@ -37,8 +37,7 @@
 
 ## 6. Infrastructure & Deployment
 26. **[ Happy ]** **Environment Validation:** Run `npm run build` without `.env`; verify script fails with clear missing var errors.
-27. **[ Happy ]** **Docker Build:** Verify `docker buildt neuromail .` creates a valid image.
-28. **[ Happy ]** **Production Build:** Verify `npm run build` produces a valid `.next` folder without lint errors.
+27. **[ Happy ]** **Production Build:** Verify `npm run build` produces a valid `.next` folder without lint errors.
 
 ## 7. Performance & Accessibility
 29. **[ Perf ]** **List Scrolling:** Rapidly scroll 100+ threads; verify 60fps (virtualization check).

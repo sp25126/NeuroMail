@@ -5,7 +5,7 @@ from database import get_db
 import schemas
 from neuromail.core.raw_email import review_service
 
-router = APIRouter(prefix="/review_queue", tags=["Human Review Queue"])
+router = APIRouter(prefix="/review", tags=["Human Review Queue"])
 
 def get_tenant_id(x_tenant_id: str = Header(default="demo-tenant")):
     return x_tenant_id

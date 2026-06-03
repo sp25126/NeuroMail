@@ -26,28 +26,52 @@ TENANT_A = "tenant-phase4-a"
 TENANT_B = "tenant-phase4-b"
 
 
-def headers(tenant: str):
-    return {"x-tenant-id": tenant, "Content-Type": "application/json"}
+def headers(tenant: str, user_id: str = None):
+    if user_id is None:
+        user_id = f"{tenant}-admin"
+    return {
+        "x-tenant-id": tenant, 
+        "X-User-ID": user_id,
+        "X-User-Role": "admin",
+        "Content-Type": "application/json"
+    }
 
 
 def setup_tenants():
     """
-    Pre-seed tenant_A and tenant_B records so FK constraints pass.
+    Pre-seed tenant_A and tenant_B records + users so FK constraints and auth pass.
     Idempotent — safe to call multiple times.
     """
     from database import SessionLocal
-    from models import Tenant
+    from models import Tenant, User, Rule, Alert, Mailbox, RawEmail
     db = SessionLocal()
     try:
-        for tid, tname in [(TENANT_A, "Test Tenant A"), (TENANT_B, "Test Tenant B")]:
-            exists = db.query(Tenant).filter(Tenant.id == tid).first()
-            if not exists:
-                t = Tenant(id=tid, name=tname)
-                db.add(t)
+        # Clear existing data for these test tenants to ensure clean slate
+        for tid in [TENANT_A, TENANT_B]:
+            db.query(Alert).filter(Alert.tenant_id == tid).delete()
+            db.query(Rule).filter(Rule.tenant_id == tid).delete()
+            db.query(RawEmail).filter(RawEmail.tenant_id == tid).delete()
+            db.query(Mailbox).filter(Mailbox.tenant_id == tid).delete()
+            db.query(User).filter(User.tenant_id == tid).delete()
+            db.query(Tenant).filter(Tenant.id == tid).delete()
         db.commit()
+
+        for tid, tname in [(TENANT_A, "Test Tenant A"), (TENANT_B, "Test Tenant B")]:
+            tenant = Tenant(id=tid, name=tname)
+            db.add(tenant)
+            db.commit()
+            
+            user_id = f"{tid}-admin"
+            user = User(id=user_id, email=f"admin@{tid}.com", tenant_id=tid, role="admin")
+            db.add(user)
+            db.commit()
     finally:
         db.close()
 
+
+@pytest.fixture(scope="module", autouse=True)
+def auto_setup():
+    setup_tenants()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. Helpers
@@ -373,8 +397,7 @@ def test_pipeline_e2e_via_seeded_email():
             received_at=datetime.datetime.utcnow(),
             normalized_metadata={
                 "toRecipients": [{"emailAddress": {"address": "ops@neuromail.com"}}]
-            },
-            ingestion_status="pending"
+            }
         )
         db.add(raw)
         db.commit()
@@ -448,8 +471,7 @@ def test_cross_tenant_pipeline_isolation():
             subject="Isolation Test Email",
             body="Cross-tenant isolation test.",
             received_at=datetime.datetime.utcnow(),
-            normalized_metadata={},
-            ingestion_status="pending"
+            normalized_metadata={}
         )
         db.add(raw)
         db.commit()

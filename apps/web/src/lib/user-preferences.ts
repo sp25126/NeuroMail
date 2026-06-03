@@ -9,6 +9,15 @@ export async function getUserLLMConfig(userId: string): Promise<LLMConfig> {
     );
 
     if (!row) {
+        if (process.env.OPENROUTER_API_KEY) {
+            return {
+                provider: "openrouter",
+                model: "google/gemini-2.5-flash",
+                apiKey: process.env.OPENROUTER_API_KEY,
+                temperature: 0.7,
+                streamingEnabled: true,
+            };
+        }
         // Return default (Ollama)
         return {
             provider: "ollama",
@@ -21,8 +30,8 @@ export async function getUserLLMConfig(userId: string): Promise<LLMConfig> {
 
     return {
         provider: row.llm_provider as any,
-        model: row.llm_model,
-        apiKey: row.llm_api_key || undefined,
+        model: row.llm_model || (row.llm_provider === "openrouter" ? "google/gemini-2.5-flash" : "gemma2:2b"),
+        apiKey: row.llm_api_key || (row.llm_provider === "openrouter" ? process.env.OPENROUTER_API_KEY : undefined),
         temperature: row.llm_temperature,
         streamingEnabled: true,
     };

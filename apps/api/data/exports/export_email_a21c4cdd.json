@@ -1,0 +1,20 @@
+[
+  {
+    "id": "email-p5",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-p5",
+    "thread_id": "thread-p5",
+    "sender": "sender@p5.com",
+    "subject": "Operational Exception Alert",
+    "received_at": "2026-06-01T19:41:34.898022"
+  },
+  {
+    "id": "5b860953-3738-43e5-a5e6-1d8efbb76789",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-f8918b0b",
+    "thread_id": "thread-new",
+    "sender": "sender@p5.com",
+    "subject": "Fresh Email",
+    "received_at": "2026-06-01T19:41:35.109666"
+  }
+]

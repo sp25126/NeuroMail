@@ -1,0 +1,2 @@
+shipment_id,primary_reference,carrier,origin_port,destination_port,current_status,eta,last_status_at,is_arrived,is_delayed,open_alert_count,last_event_type,last_event_at
+sh-rep-01,REF-XYZ,Maersk,Shanghai,Los Angeles,IN_TRANSIT,2026-06-07 19:22:50.032370,2026-06-02 17:22:50.032370,False,False,0,,

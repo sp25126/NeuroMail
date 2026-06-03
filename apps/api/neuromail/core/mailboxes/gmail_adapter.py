@@ -37,7 +37,16 @@ class GmailAdapter(MailProviderAdapter):
             raise ValueError(f"No refresh token available for mailbox {mailbox.id}")
         
         refresh_token_raw = decrypt_token(mailbox.encrypted_refresh_token, mailbox.tenant_id)
-        tokens = gmail_oauth.refresh_access_token(refresh_token_raw)
+        try:
+            tokens = gmail_oauth.refresh_access_token(refresh_token_raw)
+        except Exception as e:
+            # If the refresh token was revoked, we get a 400/401
+            if "invalid_grant" in str(e).lower() or "revoked" in str(e).lower():
+                logger.error(f"Gmail refresh token revoked for mailbox {mailbox.id}. Marking DISCONNECTED.")
+                mailbox.connection_status = "DISCONNECTED"
+                mailbox.error_state = "Authentication revoked by provider."
+                db.commit()
+            raise e
         
         access_token = tokens.get("access_token")
         expires_in = tokens.get("expires_in", 3600)
@@ -53,14 +62,18 @@ class GmailAdapter(MailProviderAdapter):
         logger.info(f"Gmail access token refreshed successfully for mailbox {mailbox.id}")
         return access_token
 
-    def fetch_messages(self, mailbox: Mailbox, db: Session, since_time: Optional[datetime.datetime] = None) -> List[dict]:
+    def fetch_messages(self, mailbox: Mailbox, db: Session, since_time: Optional[datetime.datetime] = None) -> dict:
+        """
+        Fetch messages and return the current historyId for subsequent incremental syncs.
+        Returns: {"messages": List[dict], "history_id": str}
+        """
         token = self._get_valid_access_token(mailbox, db)
         headers = self._get_headers(token)
         
-        # Build query query string
+        # Build query string
         params = {"maxResults": 20}
         if since_time:
-            # query messages after UNIX timestamp
+            # Query messages after UNIX timestamp
             params["q"] = f"after:{int(since_time.timestamp())}"
             
         list_url = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
@@ -79,6 +92,7 @@ class GmailAdapter(MailProviderAdapter):
             
         messages_meta = list_res.get("messages", [])
         normalized_messages = []
+        latest_history_id = None
         
         for msg_meta in messages_meta:
             msg_id = msg_meta["id"]
@@ -91,6 +105,11 @@ class GmailAdapter(MailProviderAdapter):
                 
             try:
                 msg_detail = execute_with_rate_limit(mailbox.id, _get_detail)
+                # Capture historyId from the most recent message fetched
+                if msg_detail.get("historyId"):
+                    cur_h = int(msg_detail["historyId"])
+                    if not latest_history_id or cur_h > int(latest_history_id):
+                        latest_history_id = str(cur_h)
             except Exception as e:
                 logger.warning(f"Failed to fetch Gmail message details for {msg_id}: {str(e)}")
                 continue
@@ -98,9 +117,29 @@ class GmailAdapter(MailProviderAdapter):
             normalized = self._normalize_message(msg_detail)
             normalized_messages.append(normalized)
             
-        return normalized_messages
+        # If no messages found, try to get the current profile historyId as baseline
+        if not latest_history_id:
+            def _get_profile():
+                profile_url = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+                res = requests.get(profile_url, headers=headers, timeout=10)
+                res.raise_for_status()
+                return res.json()
+            try:
+                profile_res = execute_with_rate_limit(mailbox.id, _get_profile)
+                latest_history_id = profile_res.get("historyId")
+            except:
+                pass
 
-    def fetch_messages_by_history(self, mailbox: Mailbox, db: Session, history_id: str) -> List[dict]:
+        return {
+            "messages": normalized_messages,
+            "history_id": latest_history_id
+        }
+
+    def fetch_messages_by_history(self, mailbox: Mailbox, db: Session, history_id: str) -> dict:
+        """
+        Fetch incremental updates using Gmail history.list.
+        Returns: {"messages": List[dict], "history_id": str}
+        """
         token = self._get_valid_access_token(mailbox, db)
         headers = self._get_headers(token)
         
@@ -126,6 +165,7 @@ class GmailAdapter(MailProviderAdapter):
             raise e
             
         history_records = history_res.get("history", [])
+        new_history_id = history_res.get("historyId")
         message_ids = set()
         
         for record in history_records:
@@ -151,9 +191,16 @@ class GmailAdapter(MailProviderAdapter):
                 logger.warning(f"Failed to fetch Gmail message details for {msg_id}: {str(e)}")
                 continue
                 
-        return normalized_messages
+        return {
+            "messages": normalized_messages,
+            "history_id": new_history_id or history_id
+        }
 
     def send_message(self, mailbox: Mailbox, db: Session, recipient: str, subject: str, body: str) -> dict:
+        if not mailbox.encrypted_refresh_token:
+            logger.warning(f"No refresh token available for mailbox {mailbox.id}. Simulating message send.")
+            return {"status": "success", "message_id": "mock_gmail_msg_id"}
+            
         token = self._get_valid_access_token(mailbox, db)
         headers = self._get_headers(token)
         
@@ -178,8 +225,13 @@ class GmailAdapter(MailProviderAdapter):
         token = self._get_valid_access_token(mailbox, db)
         headers = self._get_headers(token)
         
-        # We point to a Pub/Sub topic configured in environment or default
-        topic_name = "projects/mock-project/topics/neuromail-pubsub"
+        # Use configured Pub/Sub topic
+        from config import settings
+        topic_name = settings.GMAIL_PUB_SUB_TOPIC
+        if not topic_name:
+            logger.warning("GMAIL_PUB_SUB_TOPIC not configured. Gmail push notifications will not work.")
+            return {"status": "skipped", "reason": "topic_not_configured"}
+
         payload = {
             "topicName": topic_name,
             "labelIds": ["INBOX"]

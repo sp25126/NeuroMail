@@ -32,8 +32,6 @@ def override_get_db():
     finally:
         db.close()
 
-app.dependency_overrides[get_db] = override_get_db
-
 class TestPhase2(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -42,8 +40,8 @@ class TestPhase2(unittest.TestCase):
         db = TestingSessionLocal()
         cls.tenant1 = Tenant(id="tenant-1", name="Tenant One")
         cls.tenant2 = Tenant(id="tenant-2", name="Tenant Two")
-        cls.user1 = User(id="user-1", email="user1@tenant1.com", name="User One", tenant_id="tenant-1")
-        cls.user2 = User(id="user-2", email="user2@tenant2.com", name="User Two", tenant_id="tenant-2")
+        cls.user1 = User(id="user-1", email="user1@tenant1.com", name="User One", tenant_id="tenant-1", role="admin")
+        cls.user2 = User(id="user-2", email="user2@tenant2.com", name="User Two", tenant_id="tenant-2", role="admin")
         db.add(cls.tenant1)
         db.add(cls.tenant2)
         db.add(cls.user1)
@@ -56,9 +54,13 @@ class TestPhase2(unittest.TestCase):
         Base.metadata.drop_all(bind=engine)
 
     def setUp(self):
+        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
-        self.headers_t1 = {"X-Tenant-ID": "tenant-1"}
-        self.headers_t2 = {"X-Tenant-ID": "tenant-2"}
+        self.headers_t1 = {"X-Tenant-ID": "tenant-1", "X-User-ID": "user-1"}
+        self.headers_t2 = {"X-Tenant-ID": "tenant-2", "X-User-ID": "user-2"}
+
+    def tearDown(self):
+        app.dependency_overrides.pop(get_db, None)
 
     # ----------------- Phase 2.2 Mailbox Registry -----------------
     def test_mailbox_registry_and_status(self):

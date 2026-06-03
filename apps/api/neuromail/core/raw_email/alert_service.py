@@ -8,6 +8,13 @@ from neuromail.core.raw_email.event_synthesis import synthesize_alert_event
 
 logger = logging.getLogger("RawEmail.AlertService")
 
+def _invalidate_cache(tenant_id: str):
+    try:
+        from neuromail.core.api.routes.dashboard_router import invalidate_dashboard_cache
+        invalidate_dashboard_cache(tenant_id)
+    except Exception:
+        pass
+
 def create_or_deduplicate_alert(
     db: Session,
     tenant_id: str,
@@ -41,6 +48,7 @@ def create_or_deduplicate_alert(
         db.commit()
         db.refresh(existing_alert)
         logger.info(f"Deduplicated alert {existing_alert.id}: occurrence count is now {existing_alert.occurrence_count}")
+        _invalidate_cache(tenant_id)
         return existing_alert
         
     # 3. Create new Alert
@@ -72,6 +80,7 @@ def create_or_deduplicate_alert(
     )
     db.add(history)
     db.commit()
+    _invalidate_cache(tenant_id)
 
     # Log to entity timeline if entity is present
     if entity_id:
@@ -110,6 +119,7 @@ def acknowledge_alert(db: Session, tenant_id: str, alert_id: str, performed_by: 
     db.add(history)
     db.commit()
     db.refresh(alert)
+    _invalidate_cache(tenant_id)
     
     if alert.entity_id:
         synthesize_alert_event(
@@ -146,6 +156,7 @@ def resolve_alert(db: Session, tenant_id: str, alert_id: str, performed_by: str,
     db.add(history)
     db.commit()
     db.refresh(alert)
+    _invalidate_cache(tenant_id)
     
     if alert.entity_id:
         synthesize_alert_event(
@@ -191,6 +202,7 @@ def snooze_alert(
     db.add(history)
     db.commit()
     db.refresh(alert)
+    _invalidate_cache(tenant_id)
     
     if alert.entity_id:
         synthesize_alert_event(
@@ -230,6 +242,7 @@ def reopen_alert(db: Session, tenant_id: str, alert_id: str, performed_by: str, 
     db.add(history)
     db.commit()
     db.refresh(alert)
+    _invalidate_cache(tenant_id)
     
     if alert.entity_id:
         synthesize_alert_event(

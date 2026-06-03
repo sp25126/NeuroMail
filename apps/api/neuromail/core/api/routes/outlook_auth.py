@@ -7,11 +7,9 @@ from database import get_db
 from models import Mailbox
 from neuromail.core.auth import outlook_oauth
 from neuromail.core.auth.token_store import encrypt_token, decrypt_token
-from fastapi import Header
-def get_tenant_id(x_tenant_id: str = Header(default="demo-tenant")):
-    return x_tenant_id
-
-import schemas
+from neuromail.core.api.auth import get_current_tenant_id
+from neuromail.core.mailboxes.sync_service import SyncService
+from neuromail.core.mailboxes.provider_factory import ProviderFactory
 
 logger = logging.getLogger("API.OutlookAuth")
 
@@ -20,7 +18,7 @@ router = APIRouter(prefix="/auth/outlook", tags=["Outlook Auth"])
 @router.get("/authorize")
 def authorize(
     mailbox_id: str = Query(..., description="The mailbox ID to bind this OAuth session to"),
-    tenant_id: str = Depends(get_tenant_id),
+    tenant_id: str = Depends(get_current_tenant_id),
     db: Session = Depends(get_db)
 ):
     # Verify the mailbox exists in the tenant
@@ -90,6 +88,17 @@ def callback(
         
         db.commit()
         db.refresh(mailbox)
+
+        # 1. Trigger initial sync immediately
+        sync_service = SyncService(db)
+        sync_service.sync_mailbox(tenant_id, mailbox_id)
+
+        # 2. Setup Push Notifications (watch)
+        adapter = ProviderFactory.get_adapter("OUTLOOK")
+        try:
+            adapter.watch(mailbox, db)
+        except Exception as watch_err:
+            logger.error(f"Failed to register Outlook watch after auth: {str(watch_err)}")
         
         # Return a response that DOES NOT leak raw tokens
         return {

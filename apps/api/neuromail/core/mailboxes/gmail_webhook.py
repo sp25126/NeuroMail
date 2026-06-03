@@ -7,7 +7,27 @@ from models import Mailbox
 from neuromail.core.mailboxes.provider_factory import ProviderFactory
 from neuromail.core.raw_email import ingestion_service
 
+import redis
+from config import settings
+
 logger = logging.getLogger("Mailboxes.GmailWebhook")
+
+def _check_idempotency(message_id: str) -> bool:
+    """
+    Returns True if the message has already been processed (exists in Redis).
+    """
+    if not settings.REDIS_URL or not message_id:
+        return False
+    try:
+        r = redis.Redis.from_url(settings.REDIS_URL, socket_timeout=1)
+        key = f"webhook:idempotency:gmail:{message_id}"
+        # Set with 1 hour expiration
+        if r.set(key, "1", ex=3600, nx=True):
+            return False # New message
+        return True # Already exists
+    except Exception as e:
+        logger.warning(f"Idempotency check failed (Redis error): {str(e)}")
+        return False
 
 def process_gmail_webhook_payload(payload: dict, db: Session) -> dict:
     """
@@ -15,6 +35,12 @@ def process_gmail_webhook_payload(payload: dict, db: Session) -> dict:
     and ingests raw emails.
     """
     message = payload.get("message", {})
+    pubsub_msg_id = message.get("messageId")
+    
+    if _check_idempotency(pubsub_msg_id):
+        logger.info(f"Gmail webhook message {pubsub_msg_id} already processed. Skipping.")
+        return {"status": "skipped", "reason": "idempotency_hit"}
+
     data_b64 = message.get("data")
     if not data_b64:
         raise ValueError("Missing message data in Gmail Pub/Sub notification")
@@ -49,10 +75,12 @@ def process_gmail_webhook_payload(payload: dict, db: Session) -> dict:
     
     # Fetch messages since history or fallback to normal fetch
     if hasattr(gmail_adapter, "fetch_messages_by_history") and history_id:
-        messages = gmail_adapter.fetch_messages_by_history(mailbox, db, history_id)
+        result = gmail_adapter.fetch_messages_by_history(mailbox, db, history_id)
     else:
-        messages = gmail_adapter.fetch_messages(mailbox, db, since_time=mailbox.last_sync_time)
+        result = gmail_adapter.fetch_messages(mailbox, db, since_time=mailbox.last_sync_time)
         
+    messages = result.get("messages", [])
+    
     # Ingest messages
     ingested = ingestion_service.ingest_batch(
         db, mailbox.tenant_id, mailbox.id, messages, performed_by="gmail_webhook"

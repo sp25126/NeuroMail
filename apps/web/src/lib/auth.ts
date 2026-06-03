@@ -25,7 +25,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                 // In local development, permit any credentials
                 const email = (credentials?.email as string) || "dev@neuromail.local";
                 return {
-                    id: "dev-user-id",
+                    id: `user-${email}`,
                     name: "Developer User",
                     email: email,
                     image: "https://avatars.githubusercontent.com/u/1000?v=4"
@@ -42,9 +42,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
                     ...token, // CRITICAL: preserve email, name, picture from the provider
                     sub: account.providerAccountId || token.sub || "dev-user-id", // Ensure sub is set
                     provider: account.provider,
-                    accessToken: account.access_token || "mock-access-token",
-                    expiresAt: account.expires_at || Math.floor(Date.now() / 1000 + 3600 * 24),
-                    refreshToken: account.refresh_token || "mock-refresh-token",
+                    accessToken: account.access_token,
+                    expiresAt: account.expires_at,
+                    refreshToken: account.refresh_token,
                     error: undefined,
                 }
             }

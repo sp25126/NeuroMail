@@ -42,8 +42,6 @@ def override_get_db():
     finally:
         db.close()
 
-app.dependency_overrides[get_db] = override_get_db
-
 class TestPhase3(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -53,9 +51,15 @@ class TestPhase3(unittest.TestCase):
         # Seed test tenants
         cls.tenant_t1 = Tenant(id="tenant-1", name="Tenant One")
         cls.tenant_t2 = Tenant(id="tenant-2", name="Tenant Two")
-        
         db.add(cls.tenant_t1)
         db.add(cls.tenant_t2)
+
+        # Seed test users
+        cls.user1 = User(id="user-1", email="user1@tenant1.com", name="User One", tenant_id="tenant-1", role="admin")
+        cls.user2 = User(id="user-2", email="user2@tenant2.com", name="User Two", tenant_id="tenant-2", role="admin")
+        db.add(cls.user1)
+        db.add(cls.user2)
+        
         db.commit()
         db.close()
 
@@ -64,9 +68,10 @@ class TestPhase3(unittest.TestCase):
         Base.metadata.drop_all(bind=engine)
 
     def setUp(self):
+        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
-        self.headers_t1 = {"X-Tenant-ID": "tenant-1"}
-        self.headers_t2 = {"X-Tenant-ID": "tenant-2"}
+        self.headers_t1 = {"X-Tenant-ID": "tenant-1", "X-User-ID": "user-1"}
+        self.headers_t2 = {"X-Tenant-ID": "tenant-2", "X-User-ID": "user-2"}
         
         # Clear database tables before each test (except Tenant)
         db = TestingSessionLocal()
@@ -75,6 +80,9 @@ class TestPhase3(unittest.TestCase):
         db.query(Mailbox).delete()
         db.commit()
         db.close()
+
+    def tearDown(self):
+        app.dependency_overrides.pop(get_db, None)
 
     # ----------------- Phase 3.1 Encryption & Token Store -----------------
     def test_tenant_isolated_encryption(self):
@@ -235,7 +243,8 @@ class TestPhase3(unittest.TestCase):
         ]
         
         adapter = ProviderFactory.get_adapter("GMAIL")
-        messages = adapter.fetch_messages(mb, db)
+        result = adapter.fetch_messages(mb, db)
+        messages = result.get("messages", [])
         
         self.assertEqual(len(messages), 2)
         self.assertEqual(messages[0]["provider_message_id"], "msg1")
@@ -466,18 +475,21 @@ class TestPhase3(unittest.TestCase):
         db.commit()
         db.close()
         
-        # Mock adapter returning 1 message
-        mock_fetch.return_value = [
-            {
-                "provider_message_id": "poll-msg-1",
-                "thread_id": "th-poll",
-                "sender": "system@polling.com",
-                "subject": "Polling sync",
-                "body": "Synchronized via periodic fallback pull.",
-                "received_at": datetime.datetime.utcnow(),
-                "attachments": []
-            }
-        ]
+        # Mock adapter returning 1 message in a dict
+        mock_fetch.return_value = {
+            "messages": [
+                {
+                    "provider_message_id": "poll-msg-1",
+                    "thread_id": "th-poll",
+                    "sender": "system@polling.com",
+                    "subject": "Polling sync",
+                    "body": "Synchronized via periodic fallback pull.",
+                    "received_at": datetime.datetime.utcnow(),
+                    "attachments": []
+                }
+            ],
+            "history_id": "9999"
+        }
         
         import sys
         sys.path.insert(0, "c:/Users/saumy/OneDrive/Desktop/Neuromail/apps/workers/neuromail/tasks")

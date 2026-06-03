@@ -10,12 +10,8 @@ import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { SmartReplies } from "./SmartReplies";
 
 const logger = createLogger("ThreadDetailView");
 
@@ -214,14 +210,29 @@ export function ThreadDetailView() {
                         >
                             <EmailMessage
                                 from={msg.from || 'Unknown'}
-                                timestamp={msg.date || ''}
-                                body={msg.bodyHtml || msg.bodyText || ''}
+                                timestamp={msg.timestamp || ''}
+                                body={msg.body || ''}
                                 isLast={idx === currentThread.messages.length - 1}
                             />
                         </motion.div>
                     ))}
                 </AnimatePresence>
             </div>
+
+            {/* AI Smart Replies */}
+            {currentThread.messages?.length > 0 && (
+                <SmartReplies 
+                    emailId={currentThread.messages[currentThread.messages.length - 1].id}
+                    onSelect={(reply) => {
+                        openCompose({
+                            to: currentThread.lastMessage?.from || currentThread.sender || '',
+                            subject: `Re: ${currentThread.subject}`,
+                            body: `${reply}\n\n--- Original Message ---\n${currentThread.lastMessage?.snippet || currentThread.snippet || ''}`,
+                            threadId: currentThread.id,
+                        });
+                    }}
+                />
+            )}
         </div>
     );
 }

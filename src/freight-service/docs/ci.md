@@ -70,12 +70,4 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/neuromail_test
         run: npm run migrate:down
-
-  build-docker:
-    needs: [lint-and-format, unit-tests, db-migration-smoke-test]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: Build Docker Image
-        run: docker build -f docker/Dockerfile -t neuromail/freight-service:latest .
 ```

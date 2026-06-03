@@ -4,19 +4,74 @@ import requests
 import datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from models import Alert, NotificationChannel, NotificationLog
+from models import Alert, NotificationChannel, NotificationLog, User, NotificationPreference
 
 logger = logging.getLogger("RawEmail.NotificationService")
 
+def is_in_mute_window(window: dict, current_time: datetime.time) -> bool:
+    start_str = window.get("start")
+    end_str = window.get("end")
+    if not start_str or not end_str:
+        return False
+    try:
+        start_t = datetime.time.fromisoformat(start_str)
+        end_t = datetime.time.fromisoformat(end_str)
+        if start_t <= end_t:
+            return start_t <= current_time <= end_t
+        else: # spans midnight
+            return current_time >= start_t or current_time <= end_t
+    except Exception:
+        return False
+
 def dispatch_notifications_for_alert(db: Session, tenant_id: str, alert: Alert):
     """
-    Finds active notification channels for tenant and schedules/triggers dispatch.
-    Evaluation is isolated so HTTP delivery failures do not block the pipeline.
+    Finds active notification channels for tenant, applies user preferences / mute windows,
+    and schedules/triggers dispatch.
     """
+    users = db.query(User).filter(User.tenant_id == tenant_id).all()
+    
+    severity_map = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
+    alert_severity_num = severity_map.get(alert.severity.upper(), 2)
+
+    allowed_channel_types = set()
+    has_any_preferences = False
+    current_utc_time = datetime.datetime.utcnow().time()
+
+    for user in users:
+        pref = db.query(NotificationPreference).filter(
+            NotificationPreference.user_id == user.id,
+            NotificationPreference.tenant_id == tenant_id
+        ).first()
+        
+        if pref:
+            has_any_preferences = True
+            
+            # Check severity threshold
+            pref_severity_num = severity_map.get(pref.severity_threshold.upper(), 1)
+            if alert_severity_num < pref_severity_num:
+                continue
+                
+            # Check mute windows
+            is_muted = False
+            if pref.mute_windows:
+                for window in pref.mute_windows:
+                    if is_in_mute_window(window, current_utc_time):
+                        is_muted = True
+                        break
+            if is_muted:
+                continue
+                
+            for ch in pref.enabled_channels:
+                allowed_channel_types.add(ch.upper())
+
+    # Get all active channels for the tenant
     channels = db.query(NotificationChannel).filter(
         NotificationChannel.tenant_id == tenant_id,
         NotificationChannel.is_active == True
     ).all()
+
+    if has_any_preferences:
+        channels = [c for c in channels if c.channel_type.upper() in allowed_channel_types]
     
     logger.info(f"Dispatching notifications for alert {alert.id} across {len(channels)} active channels.")
     
@@ -67,14 +122,9 @@ def execute_delivery(channel: NotificationChannel, alert: Alert, max_retries: in
                     logger.error(f"Slack webhook url missing in channel {channel.id}")
                     return False
                     
-                # Real POST call or mock if in development/test
-                if "mock" in webhook_url or webhook_url.startswith("http://testserver"):
-                    logger.info(f"[MOCK SLACK DISPATCH] payload sent: {payload}")
-                    return True
-                else:
-                    res = requests.post(webhook_url, json=payload, timeout=5)
-                    res.raise_for_status()
-                    return True
+                res = requests.post(webhook_url, json=payload, timeout=5)
+                res.raise_for_status()
+                return True
                     
             elif channel_type == "WEBHOOK":
                 webhook_url = config.get("webhook_url")
@@ -82,18 +132,15 @@ def execute_delivery(channel: NotificationChannel, alert: Alert, max_retries: in
                     logger.error(f"Webhook URL missing in channel {channel.id}")
                     return False
                     
-                if "mock" in webhook_url or webhook_url.startswith("http://testserver"):
-                    logger.info(f"[MOCK WEBHOOK DISPATCH] payload sent: {payload}")
-                    return True
-                else:
-                    res = requests.post(webhook_url, json=payload, timeout=5)
-                    res.raise_for_status()
-                    return True
+                res = requests.post(webhook_url, json=payload, timeout=5)
+                res.raise_for_status()
+                return True
                     
             elif channel_type == "EMAIL":
-                recipient = config.get("email_recipient")
-                logger.info(f"[MOCK EMAIL DISPATCH] Sent alert email to {recipient} with subject: {payload.get('subject')}")
-                return True
+                # Real SMTP dispatch should go here. 
+                # For now, we log that dispatch is required, avoiding fake 'SENT' status.
+                logger.warning(f"Email dispatch requested for {config.get('email_recipient')} but SMTP is not yet configured.")
+                return False
                 
             logger.warning(f"Unsupported channel type: {channel_type}")
             return False

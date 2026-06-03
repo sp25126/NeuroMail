@@ -9,9 +9,9 @@
   "scripts": {
     "dev": "npm run dev:all",
     "dev:web": "npm run dev -w apps/web",
-    "dev:api": ".venv\\Scripts\\uvicorn --app-dir apps/api main:app --reload --port 8000",
-    "dev:workers": ".venv\\Scripts\\python apps/workers/worker.py",
-    "dev:all": "npx concurrently -p \"[{name}]\" -n \"api,web,worker\" -c \"cyan,magenta,yellow\" \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:workers\"",
+    "dev:api": "cd apps/api && uv run uvicorn main:app --reload --port 8000",
+    "dev:workers": "cd apps/workers && uv run python worker.py",
+    "dev:all": "npx -y concurrently -p \"[{name}]\" -n \"api,web,worker\" -c \"cyan,magenta,yellow\" \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:workers\"",
     "prebuild": "npx ts-node scripts/validate-env.ts",
     "build": "npm run build --workspace=packages/shared && npm run build --workspace=apps/web",
     "start": "next start",

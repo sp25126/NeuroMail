@@ -27,7 +27,6 @@ def ingest_normalized_email(
     normalized_metadata = msg_data.get("normalized_metadata")
     
     # 1. Idempotently insert email into DB
-    # If the email is a duplicate, the email_service.insert_raw_email returns the existing row.
     email_record = insert_raw_email(
         db=db,
         tenant_id=tenant_id,

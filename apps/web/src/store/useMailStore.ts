@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { ApiClient } from '@/lib/api-client'
 
 interface ActiveFilter {
     label: string
@@ -25,7 +26,7 @@ interface MailState {
     composeDraft: { to: string; subject: string; body: string; threadId?: string }
     searchQuery: string
     activeFilter: ActiveFilter | null
-    view: 'inbox' | 'thread' | 'compose' | 'settings' | 'dashboard' | 'alerts' | 'reports'
+    view: 'inbox' | 'thread' | 'compose' | 'settings' | 'dashboard' | 'alerts' | 'reports' | 'ops' | 'mailboxes' | 'copilot'
 
     // Data State
     emails: any[]
@@ -42,7 +43,7 @@ interface MailState {
     setSearchQuery: (query: string) => void
     setActiveFilter: (filter: ActiveFilter) => void
     clearFilter: () => void
-    setView: (view: 'inbox' | 'thread' | 'compose' | 'settings' | 'dashboard' | 'alerts' | 'reports') => void
+    setView: (view: 'inbox' | 'thread' | 'compose' | 'settings' | 'dashboard' | 'alerts' | 'reports' | 'ops' | 'mailboxes') => void
     markAsRead: (threadId: string) => Promise<void>
     openCompose: (data?: Partial<{ to: string; subject: string; body: string; threadId?: string }>) => void
 
@@ -184,7 +185,7 @@ export const useMailStore = create<MailState>((set, get) => ({
 
     setFolder: (folder) => {
         console.log("📁 [STORE] Switching folder to:", folder)
-        const isView = ['dashboard', 'alerts', 'reports'].includes(folder)
+        const isView = ['dashboard', 'alerts', 'reports', 'ops', 'copilot', 'mailboxes'].includes(folder)
         set({
             currentFolder: folder,
             searchQuery: '',
@@ -201,23 +202,56 @@ export const useMailStore = create<MailState>((set, get) => ({
             set({ selectedThreadId: null, currentThread: null, view: 'inbox' })
             return
         }
+        
+        // Find email in list to get mailboxId
+        const email = get().emails.find(e => e.id === id || e.threadId === id)
+        const mailboxId = email?.mailboxId
+        const threadId = email?.threadId || id
+
         set({ selectedThreadId: id, view: 'thread' })
-        console.log("📖 [STORE] Loading thread detail:", id)
+        console.log("📖 [STORE] Loading thread detail:", threadId)
+        
         try {
-            const res = await fetch(`/api/mail/threads/${id}`)
-            if (!res.ok) throw new Error(`HTTP ${res.status}`)
-            const data = await res.json()
-            set({ currentThread: data })
-            console.log("✅ [STORE] Thread loaded:", data.subject)
+            if (!mailboxId) throw new Error("Mailbox ID not found for thread")
+            
+            const rawEmails = await ApiClient.getThread(mailboxId, threadId)
+            
+            // Map to currentThread format
+            // The UI expects an object with 'subject', 'messages' etc.
+            const first = rawEmails[0]
+            const threadData = {
+                id: threadId,
+                subject: first.subject || "No Subject",
+                messages: rawEmails.map(m => ({
+                    id: m.id,
+                    from: m.sender,
+                    body: m.body,
+                    timestamp: m.received_at,
+                    snippet: m.body?.slice(0, 100)
+                })),
+                lastMessage: {
+                    from: rawEmails[rawEmails.length-1].sender,
+                    snippet: rawEmails[rawEmails.length-1].body?.slice(0, 100),
+                    timestamp: rawEmails[rawEmails.length-1].received_at
+                }
+            }
+            
+            set({ currentThread: threadData })
+            console.log("✅ [STORE] Thread loaded:", threadData.subject)
         } catch (err: any) {
             console.error("❌ [STORE] Thread load failed:", err)
             // Fall back to a basic thread object from the emails list
-            const emails = get().emails
-            const fallback = emails.find((e: any) => e.id === id)
+            const fallback = get().emails.find((e: any) => e.id === id)
             if (fallback) {
                 set({
                     currentThread: {
                         ...fallback,
+                        messages: [{
+                            id: fallback.id,
+                            from: fallback.sender,
+                            body: fallback.snippet,
+                            timestamp: fallback.date
+                        }],
                         lastMessage: {
                             from: fallback.sender,
                             snippet: fallback.snippet,
@@ -277,27 +311,35 @@ export const useMailStore = create<MailState>((set, get) => ({
         set({ isLoading: true, error: null })
         try {
             const { searchQuery, currentFolder } = get()
+            
+            console.log("🔄 [STORE] fetchThreads | folder:", currentFolder)
 
-            // Build the Gmail query
-            let q: string
-            if (searchQuery) {
-                // User-driven search overrides folder
-                q = searchQuery
-            } else {
-                // Use the folder→query mapping
-                q = FOLDER_QUERY_MAP[currentFolder] || 'in:inbox'
-            }
+            // 1. Fetch from modernized backend
+            const rawEmails = await ApiClient.getEmails()
+            
+            // 2. Map to frontend schema
+            const mappedEmails = rawEmails.map(e => {
+                const metadata = e.normalized_metadata || {}
+                const isUnread = metadata.labelIds?.includes("UNREAD") || false
+                const labels = metadata.labelIds || []
+                
+                return {
+                    id: e.id,
+                    mailboxId: e.mailbox_id,
+                    threadId: e.thread_id,
+                    snippet: e.body?.slice(0, 100) + "...",
+                    subject: e.subject || "No Subject",
+                    sender: e.sender,
+                    isUnread,
+                    date: new Date(e.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    labels,
+                }
+            })
 
-            console.log("🔄 [STORE] fetchThreads | folder:", currentFolder, "| query:", q)
-
-            const res = await fetch(`/api/mail/threads?q=${encodeURIComponent(q)}`)
-            if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-            const data = await res.json()
-            console.log("📦 [STORE] Received", data.threads?.length || 0, "threads")
+            console.log("📦 [STORE] Received", mappedEmails.length, "emails")
 
             set({
-                emails: Array.isArray(data.threads) ? data.threads : [],
+                emails: mappedEmails,
                 isLoading: false
             })
         } catch (error: any) {
@@ -342,18 +384,32 @@ export const useMailStore = create<MailState>((set, get) => ({
         set({ isLoading: true, error: null })
         try {
             console.log("🔎 [STORE] searchEmails:", query)
-            const res = await fetch(`/api/mail/threads?q=${encodeURIComponent(query)}`)
-            if (!res.ok) throw new Error("Search failed")
-            const data = await res.json()
+            
+            // Use real backend search
+            const results = await ApiClient.search(query)
+            
+            const mappedEmails = (results.emails || []).map(e => {
+                const metadata = e.normalized_metadata || {}
+                const isUnread = metadata.labelIds?.includes("UNREAD") || false
+                return {
+                    id: e.id,
+                    threadId: e.thread_id,
+                    snippet: e.body?.slice(0, 100) + "...",
+                    subject: e.subject || "No Subject",
+                    sender: e.sender,
+                    isUnread,
+                    date: new Date(e.received_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    labels: metadata.labelIds || [],
+                }
+            })
 
-            const threads = Array.isArray(data.threads) ? data.threads : [];
             set({
-                emails: threads,
+                emails: mappedEmails,
                 isLoading: false,
                 searchQuery: query
             })
-            console.log("✅ [STORE] Search complete:", threads.length, "results")
-            return threads;
+            console.log("✅ [STORE] Search complete:", mappedEmails.length, "results")
+            return mappedEmails;
         } catch (error: any) {
             console.error("❌ [STORE] Search failed:", error)
             set({ error: error.message, isLoading: false })

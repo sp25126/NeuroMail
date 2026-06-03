@@ -8,12 +8,14 @@ import { useSettingsStore } from "@/store/useSettingsStore";
 import { uiRegistry } from "@/lib/ui-registry";
 import { toast } from "sonner";
 import { functionComposer } from "@/agent/function-composer";
+import { ApiClient } from "@/lib/api-client";
 
 export interface Message {
     id: string;
     role: "user" | "assistant";
     content: string;
     timestamp: string;
+    sources?: Array<{ type: string; id: string; ref: string }>;
 }
 
 export function AssistantPanel() {
@@ -21,6 +23,9 @@ export function AssistantPanel() {
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    const view = useMailStore((state) => state.view);
+    const isFreightView = ["dashboard", "alerts", "reports", "ops"].includes(view);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -48,73 +53,79 @@ export function AssistantPanel() {
         setIsLoading(true);
 
         try {
-            // ⚡ CRITICAL: Serialize UI registry tools for the server
-            const registeredTools = uiRegistry.getAll().map((op) => ({
-                id: op.id,
-                type: op.type,
-                label: op.label,
-                description: op.description,
-                parameters: op.parameters || [],
-                metadata: op.metadata || {},
-                // NOTE: `execute` is a function and cannot be serialized
-            }));
+            let data;
+            if (isFreightView) {
+                console.log("📤 [ASSISTANT] Sending request to Freight Copilot:", input);
+                data = await ApiClient.freightCopilotChat(userMessage.content);
+            } else {
+                // ⚡ CRITICAL: Serialize UI registry tools for the server
+                const registeredTools = uiRegistry.getAll().map((op) => ({
+                    id: op.id,
+                    type: op.type,
+                    label: op.label,
+                    description: op.description,
+                    parameters: op.parameters || [],
+                    metadata: op.metadata || {},
+                    // NOTE: `execute` is a function and cannot be serialized
+                }));
 
-            console.log("📤 [ASSISTANT] Sending request:", {
-                message: input,
-                view: store.view,
-                emailsCount: store.emails.length,
-                registeredToolsCount: registeredTools.length,
-                toolIds: registeredTools.map((t) => t.id),
-            });
+                console.log("📤 [ASSISTANT] Sending request:", {
+                    message: input,
+                    view: store.view,
+                    emailsCount: store.emails.length,
+                    registeredToolsCount: registeredTools.length,
+                    toolIds: registeredTools.map((t) => t.id),
+                });
 
-            const response = await fetch("/api/agent/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    message: userMessage.content,
-                    sessionId: "session-123",
-                    appState: {
-                        view: store.view,
-                        filters: store.activeFilter || {},
-                    },
-                    clientState: {
-                        theme: useSettingsStore.getState().theme,
-                        isSidebarOpen: window.innerWidth < 1024 ? store.isMobileMenuOpen : useSettingsStore.getState().isSidebarOpen,
-                        isComposeOpen: store.isComposeOpen,
-                        activeModals: store.isComposeOpen ? ["compose"] : [],
-                        viewport: {
-                            width: window.innerWidth,
-                            height: window.innerHeight,
-                            isMobile: window.innerWidth < 1024
-                        }
-                    },
-                    currentThread: store.currentThread,
-                    recentThreads: store.emails.slice(0, 5),
-                    availableTools: registeredTools, // ⚡ SEND TOOLS TO SERVER
-                }),
-            });
+                const response = await fetch("/api/agent/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        message: userMessage.content,
+                        sessionId: "session-123",
+                        appState: {
+                            view: store.view,
+                            filters: store.activeFilter || {},
+                        },
+                        clientState: {
+                            theme: useSettingsStore.getState().theme,
+                            isSidebarOpen: window.innerWidth < 1024 ? store.isMobileMenuOpen : useSettingsStore.getState().isSidebarOpen,
+                            isComposeOpen: store.isComposeOpen,
+                            activeModals: store.isComposeOpen ? ["compose"] : [],
+                            viewport: {
+                                width: window.innerWidth,
+                                height: window.innerHeight,
+                                isMobile: window.innerWidth < 1024
+                            }
+                        },
+                        currentThread: store.currentThread,
+                        recentThreads: store.emails.slice(0, 5),
+                        availableTools: registeredTools, // ⚡ SEND TOOLS TO SERVER
+                    }),
+                });
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                data = await response.json();
             }
 
-            const data = await response.json();
-
             console.log("📥 [ASSISTANT] Full response:", data);
-            console.log("🔍 [ASSISTANT] Actions received:", data.actions);
 
             // Add assistant message
             const assistantMessage: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
-                content: data.assistantMessage || "Done.",
+                content: isFreightView ? data.response : (data.assistantMessage || "Done."),
                 timestamp: new Date().toISOString(),
+                sources: isFreightView ? data.sources : undefined,
             };
 
             setMessages((prev) => [...prev, assistantMessage]);
 
             // ⚡⚡⚡ CRITICAL: Execute actions ⚡⚡⚡
-            if (data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+            if (!isFreightView && data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
                 console.log("⚡⚡⚡ [ASSISTANT] Executing", data.actions.length, "actions");
 
                 for (let i = 0; i < data.actions.length; i++) {
@@ -125,7 +136,7 @@ export function AssistantPanel() {
                 }
 
                 console.log("✅ [ASSISTANT] All actions executed");
-            } else {
+            } else if (!isFreightView) {
                 console.warn("⚠️ [ASSISTANT] No actions to execute. Response:", data);
             }
         } catch (error: any) {
@@ -395,8 +406,12 @@ export function AssistantPanel() {
             <div className="border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">AI Copilot</h2>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">Running on local AI</p>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                            {isFreightView ? "Freight Copilot" : "AI Copilot"}
+                        </h2>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                            {isFreightView ? "Strictly Read-Only Analytics" : "Running on local AI"}
+                        </p>
                     </div>
                 </div>
             </div>
@@ -419,6 +434,23 @@ export function AssistantPanel() {
                                     }`}
                             >
                                 <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                                {message.sources && message.sources.length > 0 && (
+                                    <div className="mt-3 pt-2 border-t border-gray-100/10 dark:border-gray-700/50 space-y-1.5">
+                                        <div className="text-[10px] font-bold text-gray-400 dark:text-zinc-500 uppercase tracking-widest">Sources</div>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {message.sources.map((src, idx) => (
+                                                <span 
+                                                    key={idx} 
+                                                    className="inline-flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800/80 text-zinc-700 dark:text-zinc-300 text-[10px] px-2 py-0.5 rounded-full border border-zinc-200/50 dark:border-zinc-700/50 shadow-sm"
+                                                >
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 animate-pulse" />
+                                                    <span className="capitalize font-semibold text-zinc-500 dark:text-zinc-400">{src.type}:</span>
+                                                    <span className="font-mono font-medium">{src.ref}</span>
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     ))}
@@ -446,7 +478,7 @@ export function AssistantPanel() {
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask Copilot..."
+                        placeholder={isFreightView ? "Ask about shipment status, delays, storage risk..." : "Ask Copilot..."}
                         disabled={isLoading}
                         className="flex-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                     />

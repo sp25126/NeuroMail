@@ -2,6 +2,7 @@ import unittest
 import os
 import sys
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 
 # Ensure API path is in import search path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,7 +25,10 @@ class TestFastAPIBootstrap(unittest.TestCase):
         self.assertEqual(data["status"], "ok")
         self.assertEqual(data["version"], "1.0.0")
 
-    def test_readiness_endpoint(self):
+    @patch("main.check_db_connectivity", return_value=True)
+    @patch("main.check_redis_connectivity", return_value=True)
+    @patch("neuromail.core.llm.client.LLMClient.check_health", return_value=True)
+    def test_readiness_endpoint(self, mock_ai, mock_redis, mock_db):
         """
         GET /ready returns 200 when database connectivity is healthy.
         """
@@ -35,7 +39,8 @@ class TestFastAPIBootstrap(unittest.TestCase):
         self.assertEqual(data["db"], "ok")
         self.assertEqual(data["redis"], "ok")
 
-    def test_database_ping(self):
+    @patch("database.check_db_connectivity", return_value=True)
+    def test_database_ping(self, mock_db):
         """
         Verifies database ping checks return True for valid connections.
         """

@@ -1,0 +1,2 @@
+shipment_id,reference,arrived_at,picked_up_at,storage_risk_days,storage_risk_flag,alerts_open
+sh-rep-03,REF-ARRIVED,2026-05-29 15:41:03.980468,,3,True,0

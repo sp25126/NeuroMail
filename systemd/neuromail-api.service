@@ -1,0 +1,17 @@
+[Unit]
+Description=Neuromail FastAPI Backend
+After=network.target postgresql.service redis.service
+
+[Service]
+User=neuromail
+Group=neuromail
+WorkingDirectory=/var/www/neuromail/apps/api
+EnvironmentFile=/var/www/neuromail/apps/api/.env
+ExecStart=/usr/local/bin/uv run gunicorn main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/neuromail/api.log
+StandardError=append:/var/log/neuromail/api.error.log
+
+[Install]
+WantedBy=multi-user.target

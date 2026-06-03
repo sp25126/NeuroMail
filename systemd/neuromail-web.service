@@ -1,0 +1,17 @@
+[Unit]
+Description=Neuromail Frontend Dashboard
+After=network.target neuromail-api.service
+
+[Service]
+User=neuromail
+Group=neuromail
+WorkingDirectory=/var/www/neuromail/apps/web
+EnvironmentFile=/var/www/neuromail/apps/web/.env.local
+ExecStart=/usr/bin/pnpm start
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/neuromail/web.log
+StandardError=append:/var/log/neuromail/web.error.log
+
+[Install]
+WantedBy=multi-user.target

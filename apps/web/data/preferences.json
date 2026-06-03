@@ -8,5 +8,15 @@
     "llmProvider": "ollama",
     "createdAt": "2026-05-29T19:58:19.263Z",
     "updatedAt": "2026-05-29T19:58:19.263Z"
+  },
+  {
+    "id": "a257f9c6-fd7c-4ee7-b261-39f9ffff30d0",
+    "email": "saumyavishwam@gmail.com",
+    "persona": "professional",
+    "tone": "default",
+    "length": "medium",
+    "llmProvider": "ollama",
+    "createdAt": "2026-05-31T10:40:00.113Z",
+    "updatedAt": "2026-05-31T10:40:00.113Z"
   }
 ]

@@ -1,0 +1,2 @@
+shipment_id,reference,carrier,last_status_at,hours_since_update,no_update_breached,storage_risk_flag
+sh-rep-02,REF-AGING,MSC,2026-06-02 06:52:05.107195,36.0,True,False

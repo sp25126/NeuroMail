@@ -5,10 +5,49 @@ import redis
 from typing import Callable, Any
 from config import settings
 
+class RateLimitError(Exception):
+    """Custom exception raised when rate limit is exceeded."""
+    pass
+
 logger = logging.getLogger("Mailboxes.RateLimiter")
 
 # Local in-memory fallback for rate limiting if Redis is down
 _local_buckets = {}
+
+# Redis Lua script for atomic token bucket
+ACQUIRE_LUA_SCRIPT = """
+local key = KEYS[1]
+local rate = tonumber(ARGV[1])
+local capacity = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local requested = tonumber(ARGV[4])
+
+local bucket = redis.call('get', key)
+local tokens, last_update
+
+if bucket then
+    local split = {}
+    for s in string.gmatch(bucket, "([^:]+)") do
+        table.insert(split, s)
+    end
+    tokens = tonumber(split[1])
+    last_update = tonumber(split[2])
+    
+    local elapsed = math.max(0, now - last_update)
+    tokens = math.min(capacity, tokens + elapsed * rate)
+else
+    tokens = capacity
+    last_update = now
+end
+
+if tokens >= requested then
+    tokens = tokens - requested
+    redis.call('setex', key, 60, tokens .. ":" .. now)
+    return 1
+else
+    return 0
+end
+"""
 
 class TokenBucket:
     def __init__(self, mailbox_id: str, rate: float = 5.0, capacity: float = 10.0):
@@ -22,43 +61,26 @@ class TokenBucket:
         
         # Redis connection
         self.redis_client = None
+        self._script = None
         if settings.REDIS_URL:
             try:
                 self.redis_client = redis.Redis.from_url(settings.REDIS_URL, socket_timeout=2)
+                self._script = self.redis_client.register_script(ACQUIRE_LUA_SCRIPT)
             except Exception as e:
                 logger.warning(f"Could not connect to Redis for rate limiting, using memory fallback: {str(e)}")
 
     def _acquire_redis(self) -> bool:
         """
-        Acquire 1 token from the Redis token bucket.
+        Acquire 1 token from the Redis token bucket atomically via Lua script.
         """
         key = f"rate_limit:mailbox:{self.mailbox_id}"
         now = time.time()
         try:
-            # We use a simple transactional check or multi-exec
-            # Key stores: "[tokens, last_update_time]"
-            pipeline = self.redis_client.pipeline()
-            pipeline.get(key)
-            res = pipeline.execute()[0]
-            
-            if res:
-                tokens, last_update = map(float, res.decode().split(":"))
-                # Calculate how many tokens to add based on elapsed time
-                elapsed = now - last_update
-                tokens = min(self.capacity, tokens + elapsed * self.rate)
-            else:
-                tokens = self.capacity
-            
-            if tokens >= 1.0:
-                tokens -= 1.0
-                val = f"{tokens}:{now}"
-                # Save the state back
-                self.redis_client.setex(key, 60, val)
-                return True
-            else:
-                return False
+            # Returns 1 for success, 0 for failure
+            res = self._script(keys=[key], args=[self.rate, self.capacity, now, 1.0])
+            return bool(res)
         except Exception as e:
-            logger.error(f"Redis rate limit fetch failed, falling back to memory: {str(e)}")
+            logger.error(f"Redis rate limit Lua execution failed, falling back to memory: {str(e)}")
             return self._acquire_memory()
 
     def _acquire_memory(self) -> bool:
@@ -107,10 +129,15 @@ def execute_with_rate_limit(
     capacity: float = 10.0,
     max_retries: int = 5,
     initial_backoff: float = 1.0,
+    max_wait: float = 30.0,
+    fail_on_timeout: bool = False,
     **kwargs
 ) -> Any:
     # 1. Acquire token
-    if not wait_for_token(mailbox_id, rate, capacity):
+    if not wait_for_token(mailbox_id, rate, capacity, timeout=max_wait):
+        if fail_on_timeout:
+            logger.error(f"Rate limiter timeout for mailbox {mailbox_id}. Aborting request.")
+            raise TimeoutError(f"Rate limit acquisition timeout for mailbox {mailbox_id}")
         logger.warning(f"Rate limiter timeout waiting for token for mailbox {mailbox_id}. Proceeding anyway to prevent lockup.")
     
     # 2. Execute with backoff/retry

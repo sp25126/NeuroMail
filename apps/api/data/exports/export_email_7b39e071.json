@@ -1,0 +1,29 @@
+[
+  {
+    "id": "email-p5",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-p5",
+    "thread_id": "thread-p5",
+    "sender": "sender@p5.com",
+    "subject": "Operational Exception Alert",
+    "received_at": "2026-05-30T19:37:58.938485"
+  },
+  {
+    "id": "fe78b39a-81ea-41d3-b884-db6fcde8220d",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-1366b60e",
+    "thread_id": "thread-new",
+    "sender": "sender@p5.com",
+    "subject": "Fresh Email",
+    "received_at": "2026-05-30T19:38:36.703876"
+  },
+  {
+    "id": "d1b27e38-90a2-466e-b64a-f0448a5ab45c",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-bbebf277",
+    "thread_id": "thread-new",
+    "sender": "sender@p5.com",
+    "subject": "Fresh Email",
+    "received_at": "2026-05-30T19:39:15.226869"
+  }
+]

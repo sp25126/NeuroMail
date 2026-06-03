@@ -1,0 +1,17 @@
+[Unit]
+Description=Neuromail Background Worker
+After=network.target redis.service
+
+[Service]
+User=neuromail
+Group=neuromail
+WorkingDirectory=/var/www/neuromail/apps/workers
+EnvironmentFile=/var/www/neuromail/apps/api/.env
+ExecStart=/usr/local/bin/uv run python worker.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/neuromail/worker.log
+StandardError=append:/var/log/neuromail/worker.error.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { ApiClient } from "@/lib/api-client";
 import { uiRegistry } from "@/lib/ui-registry";
 import { InboxView } from "@/components/mail/InboxView";
 import { ThreadDetailView } from "@/components/mail/ThreadDetailView";
@@ -11,6 +13,9 @@ import { SettingsView } from "@/components/mail/SettingsView";
 import { DashboardView } from "@/components/mail/DashboardView";
 import { AlertsView } from "@/components/mail/AlertsView";
 import { ReportsView } from "@/components/mail/ReportsView";
+import OpsView from "@/components/mail/OpsView";
+import MailboxSettingsPage from "@/app/trackflow/settings/mailboxes/page";
+import TrackflowCopilotPage from "@/app/trackflow/copilot/page";
 import { useMailStore } from "@/store/useMailStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -20,10 +25,50 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { UIOperationsProvider } from "@/components/UIOperationsProvider";
+import { MODULE_IDENTITY } from "@/config/module-identity";
 
 export default function MailLayout({ children }: { children?: React.ReactNode }) {
-    const { view, isMobileMenuOpen, setMobileMenuOpen } = useMailStore();
+    const { data: session } = useSession();
+    const { view, isMobileMenuOpen, setMobileMenuOpen, fetchThreads } = useMailStore();
     const { showAssistant, isSidebarOpen, updateSettings } = useSettingsStore();
+
+    // 1. Full-Stack Sync: Connect real email session to modernized backend
+    useEffect(() => {
+        const syncRealEmail = async () => {
+            if (session?.user?.email) {
+                console.log("🔗 [AUTH] Synchronizing session with backend...");
+                
+                const tenantId = session.user.email === "dev@neuromail.local"
+                    ? "demo-tenant"
+                    : `tenant-${session.user.email}`;
+                const userId = session.user.email === "dev@neuromail.local"
+                    ? "demo-admin"
+                    : (session.user.id || `user-${session.user.email}`);
+                
+                // Update ApiClient context
+                ApiClient.setAuth(tenantId, userId);
+                
+                try {
+                    // Register/Update mailbox on backend with real or fallback developer token
+                    await ApiClient.registerMailbox({
+                        provider_type: "GMAIL",
+                        email: session.user.email,
+                        access_token: (session as any).accessToken || "dev-bypass-token",
+                        refresh_token: (session as any).refreshToken || "dev-bypass-refresh-token",
+                        tenant_id: tenantId,
+                        user_id: userId
+                    } as any);
+                    console.log("✅ [AUTH] Backend synchronized with email.");
+                } catch (error) {
+                    console.error("❌ [AUTH] Failed to synchronize email with backend:", error);
+                }
+                
+                // Refresh threads to show data
+                fetchThreads();
+            }
+        };
+        syncRealEmail();
+    }, [session, fetchThreads]);
 
     const setShowAssistant = (show: boolean) => updateSettings({ showAssistant: show });
     const showMobileSidebar = isMobileMenuOpen;
@@ -77,7 +122,7 @@ export default function MailLayout({ children }: { children?: React.ReactNode })
                         <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center">
                             <Sparkles size={14} className="text-white" />
                         </div>
-                        <span className="font-bold text-sm text-foreground">Neuromail</span>
+                        <span className="font-bold text-sm text-foreground">{MODULE_IDENTITY.displayName}</span>
                     </div>
                 </div>
 
@@ -89,6 +134,18 @@ export default function MailLayout({ children }: { children?: React.ReactNode })
                         showAssistant ? "lg:mr-80 mr-0" : "mr-0"
                     )}>
                         <AnimatePresence mode="wait">
+                            {view === "copilot" && (
+                                <motion.div
+                                    key="copilot"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    transition={{ duration: 0.25 }}
+                                    className="h-full"
+                                >
+                                    <TrackflowCopilotPage />
+                                </motion.div>
+                            )}
                             {view === "dashboard" && (
                                 <motion.div
                                     key="dashboard"
@@ -123,6 +180,30 @@ export default function MailLayout({ children }: { children?: React.ReactNode })
                                     className="h-full"
                                 >
                                     <ReportsView />
+                                </motion.div>
+                            )}
+                            {view === "mailboxes" && (
+                                <motion.div
+                                    key="mailboxes"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    transition={{ duration: 0.25 }}
+                                    className="h-full"
+                                >
+                                    <MailboxSettingsPage />
+                                </motion.div>
+                            )}
+                            {view === "ops" && (
+                                <motion.div
+                                    key="ops"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    transition={{ duration: 0.25 }}
+                                    className="h-full"
+                                >
+                                    <OpsView />
                                 </motion.div>
                             )}
                             {view === "inbox" && (

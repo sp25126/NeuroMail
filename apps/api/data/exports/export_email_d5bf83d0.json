@@ -1,0 +1,47 @@
+[
+  {
+    "id": "email-p5",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-p5",
+    "thread_id": "thread-p5",
+    "sender": "sender@p5.com",
+    "subject": "Operational Exception Alert",
+    "received_at": "2026-06-01T18:59:18.739007"
+  },
+  {
+    "id": "30d8ae3e-4d0d-4a5c-b521-12318ab23aac",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-c675634a",
+    "thread_id": "thread-new",
+    "sender": "sender@p5.com",
+    "subject": "Fresh Email",
+    "received_at": "2026-06-01T19:01:34.941851"
+  },
+  {
+    "id": "22aadecc-d8f6-49b1-808e-01914396ed0b",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-7d9a9ff0",
+    "thread_id": "thread-new",
+    "sender": "sender@p5.com",
+    "subject": "Fresh Email",
+    "received_at": "2026-06-01T19:05:44.868692"
+  },
+  {
+    "id": "700f2379-10f2-4caa-bac4-6ef376f8c76b",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-ff0c27dd",
+    "thread_id": "thread-new",
+    "sender": "sender@p5.com",
+    "subject": "Fresh Email",
+    "received_at": "2026-06-01T19:06:07.720138"
+  },
+  {
+    "id": "db61fa9d-f765-4417-9296-b72b30f103b8",
+    "mailbox_id": "mailbox-p5",
+    "provider_message_id": "msg-a19ea3c3",
+    "thread_id": "thread-new",
+    "sender": "sender@p5.com",
+    "subject": "Fresh Email",
+    "received_at": "2026-06-01T19:24:04.765335"
+  }
+]

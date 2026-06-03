@@ -153,29 +153,30 @@ Neuromail is structured as a monorepo containing multiple independent services:
 4. **Shared Types & Constants (`packages/shared`)**: Shared contract schemas.
 
 ### Required Infrastructure Services
-Before launching, make sure the local dependencies are up and running:
-- **PostgreSQL**: Ensure PostgreSQL is active. Database URL should be configured in your env file (e.g. `postgresql://user:password@localhost:5432/neuromail`).
+Before launching, make sure the local dependencies are up and running natively:
+- **PostgreSQL**: Ensure PostgreSQL is active on your host system. Database URL should be configured in your env file.
 - **Redis**: Background worker queue relies on Redis. Ensure Redis server is active on `redis://localhost:6379`.
 
-### Launching Local Services
-We provide unified npm commands in the root directory:
+### Launching Local Services (Native)
+We provide unified scripts in the root directory for a fully native experience (no Docker required):
 
 - **Run all services concurrently**:
   ```bash
   npm run dev
   ```
-- **Start the Next.js frontend only** (on port `3003`):
+- **Native Startup Scripts (Linux/macOS)**:
   ```bash
-  npm run dev:web
+  ./scripts/setup.sh        # One-time setup (deps + db)
+  ./scripts/start-api.sh    # Start FastAPI
+  ./scripts/start-worker.sh # Start background worker
+  ./scripts/start-web.sh    # Start Next.js
   ```
-- **Start the API backend only** (on port `8000`):
-  ```bash
-  npm run dev:api
-  ```
-- **Start the worker process only**:
-  ```bash
-  npm run dev:workers
-  ```
+
+### Production Deployment (Native Stack)
+For production on a VPS (Ubuntu/Debian), use the provided `systemd` units:
+1. Copy units: `sudo cp systemd/*.service /etc/systemd/system/`
+2. Reload: `sudo systemctl daemon-reload`
+3. Enable & Start: `sudo systemctl enable --now neuromail-api neuromail-worker neuromail-web`
 
 ---
 

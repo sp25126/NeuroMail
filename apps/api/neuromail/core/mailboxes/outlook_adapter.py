@@ -35,7 +35,16 @@ class OutlookAdapter(MailProviderAdapter):
             raise ValueError(f"No refresh token available for mailbox {mailbox.id}")
             
         refresh_token_raw = decrypt_token(mailbox.encrypted_refresh_token, mailbox.tenant_id)
-        tokens = outlook_oauth.refresh_access_token(refresh_token_raw)
+        try:
+            tokens = outlook_oauth.refresh_access_token(refresh_token_raw)
+        except Exception as e:
+            # Detect revocation in Graph (invalid_grant is common for revoked tokens)
+            if "invalid_grant" in str(e).lower() or "revoked" in str(e).lower():
+                logger.error(f"Outlook refresh token revoked for mailbox {mailbox.id}. Marking DISCONNECTED.")
+                mailbox.connection_status = "DISCONNECTED"
+                mailbox.error_state = "Authentication revoked by provider."
+                db.commit()
+            raise e
         
         access_token = tokens.get("access_token")
         refresh_token = tokens.get("refresh_token")
@@ -55,7 +64,11 @@ class OutlookAdapter(MailProviderAdapter):
         logger.info(f"Outlook access token refreshed successfully for mailbox {mailbox.id}")
         return access_token
 
-    def fetch_messages(self, mailbox: Mailbox, db: Session, since_time: Optional[datetime.datetime] = None) -> List[dict]:
+    def fetch_messages(self, mailbox: Mailbox, db: Session, since_time: Optional[datetime.datetime] = None) -> dict:
+        """
+        Fetch new messages and return them in a standard format.
+        Returns: {"messages": List[dict]}
+        """
         token = self._get_valid_access_token(mailbox, db)
         headers = self._get_headers(token)
         
@@ -109,7 +122,46 @@ class OutlookAdapter(MailProviderAdapter):
             normalized = self._normalize_message(msg, attachments)
             normalized_messages.append(normalized)
             
-        return normalized_messages
+        return {"messages": normalized_messages}
+
+    def renew_subscription(self, mailbox: Mailbox, db: Session) -> dict:
+        """
+        Renews an existing Outlook subscription before it expires.
+        """
+        if not mailbox.webhook_subscription_id:
+            return self.watch(mailbox, db)
+            
+        token = self._get_valid_access_token(mailbox, db)
+        headers = self._get_headers(token)
+        
+        sub_id = mailbox.webhook_subscription_id
+        # Max extension is 4230 minutes
+        expiration = datetime.datetime.utcnow() + datetime.timedelta(days=2)
+        expiration_str = expiration.strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        payload = {
+            "expirationDateTime": expiration_str
+        }
+        
+        def _renew():
+            renew_url = f"https://graph.microsoft.com/v1.0/subscriptions/{sub_id}"
+            res = requests.patch(renew_url, headers=headers, json=payload, timeout=10)
+            res.raise_for_status()
+            return res.json()
+            
+        try:
+            renew_res = execute_with_rate_limit(mailbox.id, _renew)
+            mailbox.webhook_subscription_expires_at = expiration
+            db.commit()
+            logger.info(f"Outlook subscription {sub_id} renewed for mailbox {mailbox.id}")
+            return renew_res
+        except Exception as e:
+            # If 404, subscription might have been deleted/expired, recreate it
+            if hasattr(e, "response") and e.response is not None and e.response.status_code == 404:
+                logger.warning(f"Outlook subscription {sub_id} not found during renewal. Recreating...")
+                return self.watch(mailbox, db)
+            logger.error(f"Failed to renew Outlook subscription for mailbox {mailbox.id}: {str(e)}")
+            raise e
 
     def send_message(self, mailbox: Mailbox, db: Session, recipient: str, subject: str, body: str) -> dict:
         token = self._get_valid_access_token(mailbox, db)

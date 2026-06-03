@@ -49,9 +49,41 @@ Add these to your **Vercel Project Settings**:
 
 ---
 
-## 🛠️ Alternative: Docker Deployment (Self-Hosted)
-If you want to keep using **SQLite**, you must deploy using Docker on a VPS (DigitalOcean, Hetzner, EC2) with a persistent volume to store the database file.
+## 🚀 Production Deployment (Native)
 
-**Dockerfile** is ready to go.
-1.  `docker build -t neuromail .`
-2.  `docker run -v $(pwd)/prisma:/app/prisma -p 3000:3000 neuromail`
+For production on a standard Linux VPS (Ubuntu/Debian), we use **systemd** to manage service lifecycles and **Nginx** as a reverse proxy.
+
+### 1. Prerequisites
+- **Python 3.11+**
+- **Node.js 18+ & pnpm**
+- **PostgreSQL & Redis**
+- **uv** (Python package manager)
+
+### 2. Setup Code
+```bash
+git clone https://github.com/your-repo/neuromail.git /var/www/neuromail
+cd /var/www/neuromail
+./scripts/setup.sh
+```
+
+### 3. Configure Services
+Copy the provided unit files and reload:
+```bash
+sudo cp systemd/*.service /etc/systemd/system/
+sudo systemctl daemon-reload
+```
+
+### 4. Launch
+```bash
+sudo systemctl enable --now neuromail-api neuromail-worker neuromail-web
+```
+
+### 5. Verify
+Check logs:
+```bash
+journalctl -u neuromail-api -f
+```
+Run health check:
+```bash
+./scripts/check-health.sh
+```

@@ -55,6 +55,13 @@ def process_email_pipeline(db: Session, tenant_id: str, raw_email_id: str) -> Di
     
     try:
         entity, created_idents, is_ambiguous = run_entity_extraction(db, tenant_id, parsed_record)
+        if entity and not is_ambiguous:
+            # Upgrade entity extraction with AI-assisted pass (Phase 6.5)
+            try:
+                from services import ai_service
+                created_idents = ai_service.merge_and_save_extracted_entities(db, tenant_id, raw_email.id, created_idents)
+            except Exception as ai_ex_err:
+                logger.error(f"AI entity extraction upgrade failed for raw_email: {raw_email.id}. Error: {str(ai_ex_err)}")
         metrics_store.increment("entity_extractions_total")
     except Exception as e:
         metrics_store.increment("entity_extractions_failed")
@@ -80,13 +87,13 @@ def process_email_pipeline(db: Session, tenant_id: str, raw_email_id: str) -> Di
             sender=parsed_record.sender
         )
 
-    # 5. Rule Evaluation Engine
+    # 5. Rule Evaluation Engine (Phase 6.4 rules consume priority and urgency)
     outcomes = []
     alerts_triggered = []
     
     try:
         metrics_store.increment("rules_evaluated_total")
-        outcomes = run_rules_evaluation(db, tenant_id, parsed_record, entity)
+        outcomes = run_rules_evaluation(db, tenant_id, parsed_record, entity, ai_data)
     except Exception as e:
         logger.error(f"Rules evaluation failed for raw_email {raw_email.id}. Error: {str(e)}")
         
@@ -137,6 +144,21 @@ def process_email_pipeline(db: Session, tenant_id: str, raw_email_id: str) -> Di
                     logger.error(f"Notification dispatch failed for alert {alert.id}: {str(e)}")
                     
                 alerts_triggered.append(alert.id)
+
+    # 7. Proactively generate smart alert suggestions for entity timeline (Phase 6.6)
+    if entity:
+        try:
+            from services import ai_service
+            ai_service.generate_smart_suggestions(db, tenant_id, entity.id)
+        except Exception as suggestions_err:
+            logger.error(f"Smart alert suggestion generation failed: {str(suggestions_err)}")
+
+    # 8. Run AI action routing (Phase 6.10)
+    try:
+        from services import ai_service
+        ai_service.run_action_routing(db, tenant_id, raw_email.id)
+    except Exception as routing_err:
+        logger.error(f"AI action routing execution failed: {str(routing_err)}")
 
     return {
         "status": "success",

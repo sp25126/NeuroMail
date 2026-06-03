@@ -21,79 +21,42 @@ def run_ai_enrichment(
     raw_email: RawEmail
 ) -> Optional[Dict[str, Any]]:
     """
-    Optional and cached AI enrichment helper.
-    Summarizes emails, tags intent and urgency. Failures of this hook do not block ingestion.
+    Upgraded AI enrichment hook.
+    Summarizes emails, tags intent and urgency using LLM Client via ai_service.
+    Failures do not block ingestion.
     """
     if not AI_ENRICHMENT_ENABLED:
         logger.info("AI enrichment is disabled. Skipping hook.")
         return None
 
-    # 1. Check cache first to avoid redundant API charges
-    cached = db.query(AIEnrichmentCache).filter(
-        AIEnrichmentCache.tenant_id == tenant_id,
-        AIEnrichmentCache.raw_email_id == raw_email.id
-    ).first()
-    
-    if cached:
-        logger.info(f"AI cache hit for raw_email: {raw_email.id}")
-        return {
-            "summary": cached.summary,
-            "intent": cached.intent,
-            "urgency": cached.urgency,
-            "metadata": cached.metadata_json
-        }
-
-    # 2. Simulate/Perform LLM call with safety rails
     try:
-        subject = raw_email.subject or ""
-        body = raw_email.body or ""
-        text = f"{subject} {body}".lower()
+        from services import ai_service
         
-        # Urgency detection logic
-        urgency = "LOW"
-        if any(w in text for w in ["delay", "urgent", "immediate", "late", "broke", "critical", "issue"]):
-            urgency = "HIGH"
-        elif any(w in text for w in ["update", "question", "status"]):
-            urgency = "MEDIUM"
-            
-        # Intent classification logic
-        intent = "OTHER"
-        if any(w in text for w in ["shipment", "cargo", "delivery", "tracking", "container", "bol"]):
-            intent = "SHIPMENT_UPDATE"
-        elif any(w in text for w in ["invoice", "pay", "billing", "cost"]):
-            intent = "BILLING"
-            
-        # Simple extraction summary
-        summary = f"Email regarding: {raw_email.subject or 'General Inquiry'}"
-        if len(body) > 10:
-            summary += f" ({body[:40]}...)"
-            
-        metadata = {
-            "extracted_at": datetime.datetime.utcnow().isoformat(),
-            "confidence": 0.85
-        }
+        # 1. Summarize
+        summary_data = ai_service.summarize_email(db, tenant_id, raw_email.id)
         
-        # Save results to cache DB
-        cache_record = AIEnrichmentCache(
-            id=str(uuid.uuid4()),
-            tenant_id=tenant_id,
-            raw_email_id=raw_email.id,
-            summary=summary,
-            intent=intent,
-            urgency=urgency,
-            metadata_json=metadata
-        )
-        db.add(cache_record)
-        db.commit()
+        # 2. Classify
+        intent = ai_service.classify_email(db, tenant_id, raw_email.id)
         
-        logger.info(f"AI enrichment completed and cached for raw_email: {raw_email.id}")
+        # 3. Score
+        scores = ai_service.score_urgency(db, tenant_id, raw_email.id)
+        
+        # Check cache record for metadata JSON
+        cached = db.query(AIEnrichmentCache).filter(
+            AIEnrichmentCache.tenant_id == tenant_id,
+            AIEnrichmentCache.raw_email_id == raw_email.id
+        ).first()
+        
+        meta = dict(cached.metadata_json) if cached and cached.metadata_json else {}
+        meta["urgency_score"] = scores.get("urgency_score")
+        
         return {
-            "summary": summary,
+            "summary": summary_data.get("formatted_summary"),
             "intent": intent,
-            "urgency": urgency,
-            "metadata": metadata
+            "urgency": scores.get("priority_label"),
+            "metadata": meta
         }
     except Exception as e:
-        # Crucial fallback: Log error but DO NOT block the parsing pipeline
         logger.error(f"AI enrichment service encountered an error (API timeout/failure): {str(e)}")
         return None
+

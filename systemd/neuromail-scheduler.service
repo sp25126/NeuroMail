@@ -1,0 +1,18 @@
+[Unit]
+Description=Neuromail Job Scheduler
+After=network.target redis.service
+
+[Service]
+User=neuromail
+Group=neuromail
+WorkingDirectory=/var/www/neuromail/apps/workers
+EnvironmentFile=/var/www/neuromail/apps/api/.env
+# Runs the same worker script; in a larger setup, this would be a separate entry point
+ExecStart=/usr/local/bin/uv run python worker.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/neuromail/scheduler.log
+StandardError=append:/var/log/neuromail/scheduler.error.log
+
+[Install]
+WantedBy=multi-user.target

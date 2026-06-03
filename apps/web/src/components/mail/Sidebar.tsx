@@ -1,22 +1,22 @@
 "use client"
 
-import { Inbox, Send, Star, Trash, FileText, Settings, LogOut, Brain, Zap, Fingerprint, Cpu, PenSquare, LayoutDashboard, Bell, BarChart3 } from "lucide-react"
+import { Inbox, Send, Star, Trash, FileText, Settings, LogOut, Brain, Zap, Fingerprint, Cpu, PenSquare, LayoutDashboard, Bell, BarChart3, Mail } from "lucide-react"
 import { useMailStore } from "@/store/useMailStore"
 import { useDeepAIStore, Persona } from "@/store/useDeepAIStore"
 import { cn } from "@/lib/utils"
 import { signOut } from "next-auth/react"
 import { motion } from "framer-motion"
 import { ThemeToggle } from "@/components/ui/ThemeToggle"
+import { MODULE_IDENTITY } from "@/config/module-identity"
 
 const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "dashboard", label: MODULE_IDENTITY.features.overview, icon: LayoutDashboard },
+    { id: "copilot", label: "TrackFlow AI", icon: BrainCircuit },
     { id: "inbox", label: "Inbox", icon: Inbox },
-    { id: "alerts", label: "Alerts", icon: Bell },
-    { id: "reports", label: "Reports", icon: BarChart3 },
-    { id: "sent", label: "Sent", icon: Send },
-    { id: "starred", label: "Starred", icon: Star },
-    { id: "drafts", label: "Drafts", icon: FileText },
-    { id: "trash", label: "Trash", icon: Trash },
+    { id: "mailboxes", label: MODULE_IDENTITY.features.mailboxes, icon: Mail },
+    { id: "alerts", label: MODULE_IDENTITY.features.alerts, icon: Bell },
+    { id: "reports", label: MODULE_IDENTITY.features.reports, icon: BarChart3 },
+    { id: "ops", label: MODULE_IDENTITY.features.admin, icon: Cpu },
 ]
 
 export interface SidebarProps {
@@ -48,7 +48,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps = {}) {
                     <Brain size={20} />
                 </div>
                 <div className="hidden lg:block relative z-10">
-                    <div className="font-bold text-lg tracking-tight leading-none">Neuromail</div>
+                    <div className="font-bold text-lg tracking-tight leading-none">{MODULE_IDENTITY.displayName}</div>
                     <div className="text-[10px] text-primary font-mono uppercase tracking-widest">v2.0 Beta</div>
                 </div>
             </div>
