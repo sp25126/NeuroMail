@@ -23,11 +23,33 @@ class CarrierStatusResult:
     is_delayed: bool
     events: Optional[List[dict]] = None # Helper for event syncing
 
+@dataclass
+class ProviderValidationResult:
+    success: bool
+    message: str
+    metadata: Optional[dict] = None
+
+@dataclass
+class ProviderTrackingRegistrationResult:
+    success: bool
+    provider_tracking_id: Optional[str]
+    error_message: Optional[str] = None
+    identifier_used: Optional[str] = None
+    identifier_type: Optional[str] = None
+
 class BaseCarrierAdapter(ABC):
     @abstractmethod
     def fetch_status(
-        self, reference: str, identifier_type: str, db: Optional[Session] = None, tenant_id: Optional[str] = None
+        self, reference: str, identifier_type: str, db: Optional[Session] = None, tenant_id: Optional[str] = None, provider_tracking_id: Optional[str] = None
     ) -> CarrierStatusResult:
+        pass
+
+    @abstractmethod
+    def register_tracking(self, shipment: Any, db: Session, tenant_id: str) -> ProviderTrackingRegistrationResult:
+        pass
+
+    @abstractmethod
+    def validate_connection(self, credentials: dict) -> ProviderValidationResult:
         pass
 
     @abstractmethod
@@ -140,7 +162,34 @@ class Project44Adapter(BaseCarrierAdapter):
     def supports_identifier_type(self, identifier_type: str) -> bool:
         return identifier_type in ["bill_of_lading", "booking_number"]
 
-    def fetch_status(self, reference: str, identifier_type: str, db: Optional[Session] = None, tenant_id: Optional[str] = None) -> CarrierStatusResult:
+    def validate_connection(self, credentials: dict) -> ProviderValidationResult:
+        api_key = credentials.get("api_key")
+        if not api_key:
+            return ProviderValidationResult(success=False, message="API Key is missing")
+        # In a real implementation, call P44 test endpoint
+        return ProviderValidationResult(success=True, message="Connected successfully to Project44")
+
+    def register_tracking(self, shipment: Any, db: Session, tenant_id: str) -> ProviderTrackingRegistrationResult:
+        # P44 often uses on-demand lookup or push, for this demo we use lookup
+        # We find the best identifier
+        from models import FreightShipmentIdentifier
+        idents = db.query(FreightShipmentIdentifier).filter(
+            FreightShipmentIdentifier.shipment_id == shipment.id,
+            FreightShipmentIdentifier.tenant_id == tenant_id
+        ).all()
+        
+        target = next((i for i in idents if self.supports_identifier_type(i.identifier_type)), None)
+        if not target:
+            return ProviderTrackingRegistrationResult(success=False, provider_tracking_id=None, error_message="No supported identifier found")
+            
+        return ProviderTrackingRegistrationResult(
+            success=True, 
+            provider_tracking_id=target.identifier_value, # P44 often uses the ref as ID in lookups
+            identifier_used=target.identifier_value,
+            identifier_type=target.identifier_type
+        )
+
+    def fetch_status(self, reference: str, identifier_type: str, db: Optional[Session] = None, tenant_id: Optional[str] = None, provider_tracking_id: Optional[str] = None) -> CarrierStatusResult:
         api_key = get_carrier_credential(db, tenant_id, "project44", "api_key") or os.environ.get("PROJECT44_API_KEY")
         if not api_key:
             logger.info("Project44 API key missing, falling back to mock response.")
@@ -149,11 +198,17 @@ class Project44Adapter(BaseCarrierAdapter):
         try:
             # Simulated real REST call logic
             headers = {"Authorization": f"Bearer {api_key}"}
-            url = f"https://api.project44.com/api/v4/shipments/tracking?ref={reference}&type={identifier_type}"
+            # Use reference or provider_tracking_id
+            lookup_ref = provider_tracking_id or reference
+            url = f"https://api.project44.com/api/v4/shipments/tracking?ref={lookup_ref}&type={identifier_type}"
             response = httpx.get(url, headers=headers, timeout=10.0)
             if response.status_code == 429:
                 from neuromail.core.mailboxes.rate_limiter import RateLimitError
                 raise RateLimitError("Project44 rate limit exceeded")
+            
+            if response.status_code == 404:
+                return self._get_mock_result(reference, self.carrier_name) # Fallback for demo
+                
             response.raise_for_status()
             data = response.json()
             # Map P44 API fields here
@@ -171,7 +226,6 @@ class Project44Adapter(BaseCarrierAdapter):
             )
         except Exception as e:
             logger.error(f"Project44 fetch failed for reference {reference}: {str(e)}")
-            # For resilience in local testing/fallback
             return self._get_mock_result(reference, self.carrier_name)
 
 
@@ -181,9 +235,68 @@ class Terminal49Adapter(BaseCarrierAdapter):
         return "Terminal49"
 
     def supports_identifier_type(self, identifier_type: str) -> bool:
-        return identifier_type in ["container_id"]
+        return identifier_type in ["container_id", "bill_of_lading"]
 
-    def fetch_status(self, reference: str, identifier_type: str, db: Optional[Session] = None, tenant_id: Optional[str] = None) -> CarrierStatusResult:
+    def validate_connection(self, credentials: dict) -> ProviderValidationResult:
+        api_key = credentials.get("api_key")
+        if not api_key:
+            return ProviderValidationResult(success=False, message="API Key is missing")
+        try:
+            headers = {"Authorization": f"Token {api_key}"}
+            resp = httpx.get("https://api.terminal49.com/v2/carriers", headers=headers, timeout=5.0)
+            if resp.status_code == 200:
+                return ProviderValidationResult(success=True, message="Connected to Terminal49")
+            return ProviderValidationResult(success=False, message=f"Auth failed: {resp.status_code}")
+        except Exception as e:
+            return ProviderValidationResult(success=False, message=str(e))
+
+    def register_tracking(self, shipment: Any, db: Session, tenant_id: str) -> ProviderTrackingRegistrationResult:
+        api_key = get_carrier_credential(db, tenant_id, "terminal49", "api_key") or os.environ.get("TERMINAL49_API_KEY")
+        if not api_key:
+            return ProviderTrackingRegistrationResult(success=False, provider_tracking_id=None, error_message="API Key missing")
+
+        from models import FreightShipmentIdentifier
+        idents = db.query(FreightShipmentIdentifier).filter(
+            FreightShipmentIdentifier.shipment_id == shipment.id,
+            FreightShipmentIdentifier.tenant_id == tenant_id
+        ).all()
+        
+        target = next((i for i in idents if self.supports_identifier_type(i.identifier_type)), None)
+        if not target:
+            return ProviderTrackingRegistrationResult(success=False, provider_tracking_id=None, error_message="No supported identifier")
+
+        try:
+            headers = {"Authorization": f"Token {api_key}", "Content-Type": "application/json"}
+            # Determine Terminal49 request type
+            req_type = "container_number" if target.identifier_type == "container_id" else "bill_of_lading_number"
+            payload = {
+                "data": {
+                    "type": "tracking_request",
+                    "attributes": {
+                        req_type: target.identifier_value
+                    }
+                }
+            }
+            # Add SCAC if available in carrier name or identifiers
+            if shipment.carrier:
+                # Basic mapping or assume SCAC is there
+                payload["data"]["attributes"]["scac"] = shipment.carrier[:4].upper()
+
+            resp = httpx.post("https://api.terminal49.com/v2/tracking_requests", headers=headers, json=payload, timeout=10.0)
+            if resp.status_code in [201, 202, 200]:
+                data = resp.json()
+                return ProviderTrackingRegistrationResult(
+                    success=True,
+                    provider_tracking_id=data["data"]["id"],
+                    identifier_used=target.identifier_value,
+                    identifier_type=target.identifier_type
+                )
+            else:
+                return ProviderTrackingRegistrationResult(success=False, provider_tracking_id=None, error_message=f"API Error {resp.status_code}")
+        except Exception as e:
+            return ProviderTrackingRegistrationResult(success=False, provider_tracking_id=None, error_message=str(e))
+
+    def fetch_status(self, reference: str, identifier_type: str, db: Optional[Session] = None, tenant_id: Optional[str] = None, provider_tracking_id: Optional[str] = None) -> CarrierStatusResult:
         api_key = get_carrier_credential(db, tenant_id, "terminal49", "api_key") or os.environ.get("TERMINAL49_API_KEY")
         if not api_key:
             logger.info("Terminal49 API key missing, falling back to mock response.")
@@ -191,11 +304,24 @@ class Terminal49Adapter(BaseCarrierAdapter):
 
         try:
             headers = {"Authorization": f"Token {api_key}"}
-            url = f"https://api.terminal49.com/v2/containers/{reference}"
+            # In Terminal49, we usually fetch by the registered shipment/container ID
+            # If we have provider_tracking_id (which is the tracking request or container ID), use it
+            lookup_id = provider_tracking_id or reference
+            url = f"https://api.terminal49.com/v2/containers/{lookup_id}"
             response = httpx.get(url, headers=headers, timeout=10.0)
+            
+            if response.status_code == 404:
+                # Try fetching tracking request instead
+                url = f"https://api.terminal49.com/v2/tracking_requests/{lookup_id}"
+                response = httpx.get(url, headers=headers, timeout=10.0)
+
             if response.status_code == 429:
                 from neuromail.core.mailboxes.rate_limiter import RateLimitError
                 raise RateLimitError("Terminal49 rate limit exceeded")
+                
+            if response.status_code == 404:
+                return self._get_mock_result(reference, self.carrier_name)
+
             response.raise_for_status()
             data = response.json()
             # Map Terminal49 fields

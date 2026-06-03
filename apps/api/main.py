@@ -148,6 +148,33 @@ def validate_runtime():
                     """))
                     logger.info("Migrated database: ensured trackflow_field_provenance table exists")
                 except Exception as tbl_err:
+                    logger.warning(f"Failed to create trackflow_field_provenance table: {tbl_err}")
+
+                # 9. shipment_tracking_bindings table
+                try:
+                    conn_migration.execute(text("""
+                        CREATE TABLE IF NOT EXISTS shipment_tracking_bindings (
+                            id VARCHAR PRIMARY KEY,
+                            tenant_id VARCHAR NOT NULL,
+                            shipment_id VARCHAR NOT NULL,
+                            provider_name VARCHAR NOT NULL,
+                            provider_tracking_id VARCHAR,
+                            registration_status VARCHAR NOT NULL DEFAULT 'pending',
+                            identifier_type_used VARCHAR,
+                            identifier_value_used VARCHAR,
+                            last_registration_attempt_at DATETIME,
+                            last_sync_at DATETIME,
+                            failure_reason TEXT,
+                            created_at DATETIME NOT NULL,
+                            updated_at DATETIME NOT NULL,
+                            FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+                            FOREIGN KEY (shipment_id) REFERENCES freight_shipments(id) ON DELETE CASCADE,
+                            UNIQUE(tenant_id, shipment_id, provider_name)
+                        )
+                    """))
+                    logger.info("Migrated database: ensured shipment_tracking_bindings table exists")
+                except Exception as tbl_err:
+                    logger.warning(f"Failed to create shipment_tracking_bindings table: {tbl_err}")
                     logger.error(f"Failed to create trackflow_field_provenance table: {tbl_err}")
 
         except Exception as migration_err:
@@ -231,7 +258,9 @@ app.include_router(dlq_router.router)
 app.include_router(quotas_router.router)
 app.include_router(freight_router.router)
 app.include_router(freight_enterprise_router.router)
-app.include_router(trackflow_mailboxes.router)
+from neuromail.core.api.routes import trackflow_providers
+
+app.include_router(trackflow_providers.router)
 
 
 def get_tenant_id(x_tenant_id: str = Depends(get_current_tenant_id)):

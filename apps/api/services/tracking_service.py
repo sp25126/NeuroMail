@@ -12,7 +12,9 @@ from models import (
     FreightEvent,
     FreightCarrierSnapshot,
     FreightSyncRun,
-    FreightTenantConfig
+    FreightTenantConfig,
+    ShipmentTrackingBinding,
+    FreightProviderConnection
 )
 from neuromail.core.mailboxes.carrier_adapter import carrier_registry, CarrierStatusResult
 from services.rules_engine import RuleContext, evaluate_rules
@@ -82,198 +84,214 @@ def map_to_dcsa_milestone(event_code: str) -> str:
         return "GATE_OUT"
     return "ARRIVAL"
 
-def sync_single_shipment(db: Session, tenant_id: str, shipment: FreightShipment, run_id: Optional[str] = None) -> dict:
-    now = datetime.datetime.utcnow()
-    
-    # 1. Fetch auxiliary identifiers
-    idents = db.query(FreightShipmentIdentifier).filter(
-        FreightShipmentIdentifier.shipment_id == shipment.id,
-        FreightShipmentIdentifier.tenant_id == tenant_id
-    ).all()
-    
-    best_ident = None
-    best_ident_type = "primary_reference"
-    
-    container = next((i for i in idents if i.identifier_type == "container_id"), None)
-    bol = next((i for i in idents if i.identifier_type == "bill_of_lading"), None)
-    booking = next((i for i in idents if i.identifier_type == "booking_number"), None)
-    
-    if container:
-        best_ident = container.identifier_value
-        best_ident_type = "container_id"
-    elif bol:
-        best_ident = bol.identifier_value
-        best_ident_type = "bill_of_lading"
-    elif booking:
-        best_ident = booking.identifier_value
-        best_ident_type = "booking_number"
-    else:
-        best_ident = shipment.primary_reference
-        best_ident_type = "primary_reference"
+def get_shipment_binding(db: Session, tenant_id: str, shipment_id: str, provider_name: str) -> Optional[ShipmentTrackingBinding]:
+    return db.query(ShipmentTrackingBinding).filter(
+        ShipmentTrackingBinding.tenant_id == tenant_id,
+        ShipmentTrackingBinding.shipment_id == shipment_id,
+        ShipmentTrackingBinding.provider_name == provider_name
+    ).first()
+
+def ensure_shipment_registered(db: Session, tenant_id: str, shipment: FreightShipment, provider_name: str) -> Optional[ShipmentTrackingBinding]:
+    binding = get_shipment_binding(db, tenant_id, shipment.id, provider_name)
+    if binding and binding.registration_status == "registered":
+        return binding
         
-    # 2. Resolve adapter
-    carrier_name = shipment.carrier or "Fallback"
-    adapter = carrier_registry.resolve(carrier_name, best_ident_type)
+    # Resolve adapter instance
+    adapter = None
+    for a in carrier_registry._adapters:
+        if a.carrier_name.lower() == provider_name.lower():
+            adapter = a
+            break
+    
     if not adapter:
-        raise ValueError(f"No adapter registered for carrier {carrier_name} and identifier {best_ident_type}")
-        
-    # Rate Limiting check
-    r_client = get_redis_client()
-    if r_client:
-        limit_rate = 10
-        if "terminal49" in adapter.carrier_name.lower():
-            limit_rate = 5
-        if not check_rate_limit(r_client, tenant_id, adapter.carrier_name, rate=limit_rate, capacity=limit_rate):
-            raise RateLimitError(f"Rate limit exceeded for carrier {adapter.carrier_name}")
-            
-    # 3. Call adapter to fetch current status
-    result: CarrierStatusResult = adapter.fetch_status(best_ident, best_ident_type, db=db, tenant_id=tenant_id)
-    
-    # 4. Get previous snapshot
-    previous_snapshot = db.query(FreightCarrierSnapshot).filter(
-        FreightCarrierSnapshot.shipment_id == shipment.id,
-        FreightCarrierSnapshot.tenant_id == tenant_id
-    ).order_by(FreightCarrierSnapshot.synced_at.desc()).first()
-    
-    # 5. Save carrier snapshot
-    snapshot = FreightCarrierSnapshot(
-        id=str(uuid.uuid4()),
-        tenant_id=tenant_id,
-        shipment_id=shipment.id,
-        carrier_adapter=adapter.carrier_name,
-        reference_used=best_ident,
-        carrier_status=result.carrier_status,
-        location=result.location,
-        eta=result.eta,
-        vessel_name=result.vessel_name,
-        last_event=result.last_event,
-        last_event_at=result.last_event_at,
-        is_arrived=result.is_arrived,
-        is_delayed=result.is_delayed,
-        raw_response=result.raw_response,
-        synced_at=now
-    )
-    db.add(snapshot)
-    db.flush()
-    
-    # 6. Update shipment model fields
-    old_status = shipment.last_known_status
-    old_eta = shipment.eta
-    
-    shipment.last_known_status = result.carrier_status
-    if result.eta:
-        shipment.eta = result.eta
-        
-    if old_status != result.carrier_status or not shipment.last_status_at:
-        shipment.last_status_at = now
-        
-    shipment.updated_at = now
-    shipment.status_source = "carrier_api"
-    db.add(shipment)
-    
-    # 7. Append status change event
-    status_changed = (old_status != result.carrier_status) or (old_eta != result.eta)
-    if status_changed:
-        event = FreightEvent(
+        return None
+
+    if not binding:
+        binding = ShipmentTrackingBinding(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
             shipment_id=shipment.id,
-            event_type="status_changed",
-            payload={
-                "old_status": old_status,
-                "new_status": result.carrier_status,
-                "old_eta": old_eta.isoformat() if old_eta else None,
-                "new_eta": result.eta.isoformat() if result.eta else None,
-                "location": result.location,
-                "event_name": result.last_event
-            },
-            created_at=now,
-            created_by="system"
+            provider_name=provider_name,
+            registration_status="pending"
         )
-        db.add(event)
+        db.add(binding)
+        db.flush()
+
+    res = adapter.register_tracking(shipment, db, tenant_id)
+    binding.last_registration_attempt_at = datetime.datetime.utcnow()
+    if res.success:
+        binding.registration_status = "registered"
+        binding.provider_tracking_id = res.provider_tracking_id
+        binding.identifier_type_used = res.identifier_type
+        binding.identifier_value_used = res.identifier_used
+        binding.failure_reason = None
+    else:
+        binding.registration_status = "failed"
+        binding.failure_reason = res.error_message
+    
+    db.add(binding)
+    db.commit()
+    return binding
+
+def sync_single_shipment(db: Session, tenant_id: str, shipment: FreightShipment, run_id: Optional[str] = None) -> dict:
+    now = datetime.datetime.utcnow()
+    
+    # 1. Determine which providers to sync with based on tenant connections
+    connections = db.query(FreightProviderConnection).filter(
+        FreightProviderConnection.tenant_id == tenant_id,
+        FreightProviderConnection.status == "connected"
+    ).all()
+    
+    active_providers = [c.provider_type.lower() for c in connections if c.provider_type.lower() in ["terminal49", "project44"]]
+    
+    if not active_providers:
+        # Fallback sync (legacy behavior or generic polling)
+        return {"shipment_id": shipment.id, "status": "no_active_providers"}
+
+    results = []
+    for p_name in active_providers:
+        # 2. Ensure registered
+        binding = ensure_shipment_registered(db, tenant_id, shipment, p_name)
+        if not binding or binding.registration_status != "registered":
+            continue
+
+        # 3. Resolve adapter
+        adapter = None
+        for a in carrier_registry._adapters:
+            if a.carrier_name.lower() == p_name.lower():
+                adapter = a
+                break
         
-    # 8. Sync milestones events if available
-    if hasattr(result, 'events') and result.events:
-        existing_events = db.query(FreightEvent).filter(
-            FreightEvent.shipment_id == shipment.id,
-            FreightEvent.tenant_id == tenant_id
-        ).all()
-        existing_event_ids = set()
-        for e in existing_events:
-            if e.payload and isinstance(e.payload, dict):
-                eid = e.payload.get("event_id")
-                if eid:
-                    existing_event_ids.add(eid)
-                    
-        for ev in result.events:
-            event_id = ev["event_id"]
-            if event_id not in existing_event_ids:
-                dcsa_milestone = map_to_dcsa_milestone(ev["milestone_code"])
+        if not adapter:
+            continue
+            
+        # Rate Limiting check
+        r_client = get_redis_client()
+        if r_client:
+            if not check_rate_limit(r_client, tenant_id, adapter.carrier_name):
+                logger.warning(f"Rate limit hit for {p_name}")
+                continue
+                
+        # 4. Fetch Status
+        try:
+            # Previous snapshot for rule evaluation
+            previous_snapshot = db.query(FreightCarrierSnapshot).filter(
+                FreightCarrierSnapshot.shipment_id == shipment.id,
+                FreightCarrierSnapshot.tenant_id == tenant_id,
+                FreightCarrierSnapshot.carrier_adapter == adapter.carrier_name
+            ).order_by(FreightCarrierSnapshot.synced_at.desc()).first()
+
+            res: CarrierStatusResult = adapter.fetch_status(
+                reference=binding.identifier_value_used,
+                identifier_type=binding.identifier_type_used,
+                db=db,
+                tenant_id=tenant_id,
+                provider_tracking_id=binding.provider_tracking_id
+            )
+            
+            # 5. Persistent Snapshot
+            snapshot = FreightCarrierSnapshot(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                shipment_id=shipment.id,
+                carrier_adapter=adapter.carrier_name,
+                reference_used=binding.identifier_value_used,
+                carrier_status=res.carrier_status,
+                location=res.location,
+                eta=res.eta,
+                vessel_name=res.vessel_name,
+                last_event=res.last_event,
+                last_event_at=res.last_event_at,
+                is_arrived=res.is_arrived,
+                is_delayed=res.is_delayed,
+                raw_response=res.raw_response,
+                synced_at=now
+            )
+            db.add(snapshot)
+            db.flush()
+            
+            # 6. Update Shipment state (Precedence: Carrier API > Email)
+            old_status = shipment.last_known_status
+            old_eta = shipment.eta
+            
+            shipment.last_known_status = res.carrier_status
+            if res.eta:
+                shipment.eta = res.eta
+            shipment.status_source = f"carrier_api:{p_name}"
+            shipment.last_status_at = now
+            shipment.updated_at = now
+            db.add(shipment)
+            
+            # 7. Append status change event
+            if (old_status != res.carrier_status) or (old_eta != res.eta):
                 event = FreightEvent(
                     id=str(uuid.uuid4()),
                     tenant_id=tenant_id,
                     shipment_id=shipment.id,
-                    event_type="field_updated",
+                    event_type="status_changed",
                     payload={
-                        "event_id": event_id,
-                        "milestone": dcsa_milestone,
-                        "location": ev.get("location_name"),
-                        "event_time": ev["event_time"].isoformat(),
-                        "raw": ev["raw_payload"]
+                        "old_status": old_status,
+                        "new_status": res.carrier_status,
+                        "old_eta": old_eta.isoformat() if old_eta else None,
+                        "new_eta": res.eta.isoformat() if res.eta else None,
+                        "location": res.location,
+                        "event_name": res.last_event,
+                        "source": p_name
                     },
+                    created_at=now,
                     created_by="system"
                 )
                 db.add(event)
-                
-    db.flush()
-    
-    # 9. Evaluate rules & create/dispatch alerts
-    from models import FreightAlert
-    existing_alerts = db.query(FreightAlert).filter(
-        FreightAlert.tenant_id == tenant_id,
-        FreightAlert.shipment_id == shipment.id
-    ).all()
-    
-    tenant_config = db.query(FreightTenantConfig).filter(
-        FreightTenantConfig.tenant_id == tenant_id
-    ).first()
-    
-    context = RuleContext(
-        tenant_id=tenant_id,
-        shipment=shipment,
-        latest_snapshot=snapshot,
-        previous_snapshot=previous_snapshot,
-        tenant_config=tenant_config,
-        existing_alerts=existing_alerts,
-        now=now
-    )
-    
-    matches = evaluate_rules(context)
-    for match in matches:
-        alert = get_or_create_alert(
-            db=db,
-            tenant_id=tenant_id,
-            shipment_id=shipment.id,
-            rule_type=match.rule_type,
-            severity=match.severity,
-            title=match.title,
-            description=match.description,
-            now=now
-        )
-        if alert:
-            try:
-                dispatch_notifications(db, tenant_id, alert)
-            except Exception as dispatch_err:
-                logger.error(f"Failed to dispatch notifications for alert {alert.id}: {str(dispatch_err)}")
-                
+            
+            # 8. Update binding
+            binding.last_sync_at = now
+            db.add(binding)
+            
+            # 9. Evaluate rules
+            existing_alerts = db.query(FreightAlert).filter(
+                FreightAlert.tenant_id == tenant_id,
+                FreightAlert.shipment_id == shipment.id
+            ).all()
+            
+            tenant_config = db.query(FreightTenantConfig).filter(
+                FreightTenantConfig.tenant_id == tenant_id
+            ).first()
+            
+            context = RuleContext(
+                tenant_id=tenant_id,
+                shipment=shipment,
+                latest_snapshot=snapshot,
+                previous_snapshot=previous_snapshot,
+                tenant_config=tenant_config,
+                existing_alerts=existing_alerts,
+                now=now
+            )
+            
+            matches = evaluate_rules(context)
+            for match in matches:
+                alert = get_or_create_alert(
+                    db=db,
+                    tenant_id=tenant_id,
+                    shipment_id=shipment.id,
+                    rule_type=match.rule_type,
+                    severity=match.severity,
+                    title=match.title,
+                    description=match.description,
+                    now=now
+                )
+                if alert:
+                    try:
+                        dispatch_notifications(db, tenant_id, alert)
+                    except Exception as dispatch_err:
+                        logger.error(f"Failed to dispatch notifications for alert {alert.id}: {str(dispatch_err)}")
+
+            results.append({"provider": p_name, "status": res.carrier_status})
+        except Exception as e:
+            logger.error(f"Failed to fetch status from {p_name} for shipment {shipment.id}: {e}")
+            continue
+
     db.commit()
-    
-    return {
-        "shipment_id": shipment.id,
-        "status": result.carrier_status,
-        "is_arrived": result.is_arrived,
-        "is_delayed": result.is_delayed
-    }
+    return {"shipment_id": shipment.id, "provider_results": results}
 
 def run_tracking_sync(db: Session, tenant_id: str, run_type: str = "manual") -> int:
     now = datetime.datetime.utcnow()

@@ -15,6 +15,7 @@ import { AlertsView } from "@/components/mail/AlertsView";
 import { ReportsView } from "@/components/mail/ReportsView";
 import OpsView from "@/components/mail/OpsView";
 import MailboxSettingsPage from "@/app/trackflow/settings/mailboxes/page";
+import TrackingProvidersPage from "@/app/trackflow/settings/providers/page";
 import TrackflowCopilotPage from "@/app/trackflow/copilot/page";
 import { useMailStore } from "@/store/useMailStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
@@ -180,6 +181,18 @@ export default function MailLayout({ children }: { children?: React.ReactNode })
                                     className="h-full"
                                 >
                                     <ReportsView />
+                                </motion.div>
+                            )}
+                            {view === "providers" && (
+                                <motion.div
+                                    key="providers"
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0, y: -20 }}
+                                    transition={{ duration: 0.25 }}
+                                    className="h-full overflow-y-auto"
+                                >
+                                    <TrackingProvidersPage />
                                 </motion.div>
                             )}
                             {view === "mailboxes" && (

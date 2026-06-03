@@ -607,6 +607,7 @@ class FreightShipment(Base):
     carrier_snapshots = relationship("FreightCarrierSnapshot", back_populates="shipment", cascade="all, delete-orphan")
     freight_alerts = relationship("FreightAlert", back_populates="shipment", cascade="all, delete-orphan")
     provenances = relationship("TrackflowFieldProvenance", back_populates="shipment", cascade="all, delete-orphan")
+    tracking_bindings = relationship("ShipmentTrackingBinding", back_populates="shipment", cascade="all, delete-orphan")
 
 class FreightShipmentIdentifier(Base):
     __tablename__ = "freight_shipment_identifiers"
@@ -879,6 +880,29 @@ class FreightProviderConnection(Base):
     connection_metadata = Column(JSON, nullable=True) # encrypted tokens, etc.
 
     tenant = relationship("Tenant", back_populates="freight_provider_connections")
+
+class ShipmentTrackingBinding(Base):
+    __tablename__ = "shipment_tracking_bindings"
+
+    id = Column(String, primary_key=True, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    shipment_id = Column(String, ForeignKey("freight_shipments.id", ondelete="CASCADE"), nullable=False)
+    provider_name = Column(String, nullable=False) # terminal49, project44
+    provider_tracking_id = Column(String, nullable=True)
+    registration_status = Column(String, default="pending", nullable=False) # pending, registered, failed, not_supported
+    identifier_type_used = Column(String, nullable=True)
+    identifier_value_used = Column(String, nullable=True)
+    last_registration_attempt_at = Column(DateTime, nullable=True)
+    last_sync_at = Column(DateTime, nullable=True)
+    failure_reason = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+
+    shipment = relationship("FreightShipment", back_populates="tracking_bindings")
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "shipment_id", "provider_name", name="uq_shipment_provider_binding"),
+    )
 
 class FreightJobFailure(Base):
     __tablename__ = "freight_job_failures"

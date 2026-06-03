@@ -26,7 +26,7 @@ interface MailState {
     composeDraft: { to: string; subject: string; body: string; threadId?: string }
     searchQuery: string
     activeFilter: ActiveFilter | null
-    view: 'inbox' | 'thread' | 'compose' | 'settings' | 'dashboard' | 'alerts' | 'reports' | 'ops' | 'mailboxes' | 'copilot'
+    view: 'inbox' | 'thread' | 'compose' | 'settings' | 'dashboard' | 'alerts' | 'reports' | 'ops' | 'mailboxes' | 'copilot' | 'providers'
 
     // Data State
     emails: any[]

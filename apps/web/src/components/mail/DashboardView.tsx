@@ -308,6 +308,20 @@ export function DashboardView() {
                                                 </div>
 
                                                 <div className="border-t border-b border-white/5 py-4 space-y-3 text-xs">
+                                                    <div className="flex justify-between items-center">
+                                                        <span className="text-neutral-400">Status Source:</span>
+                                                        <div className="flex gap-2 items-center">
+                                                            {selectedShipment.shipment.status_source.includes("carrier_api") ? (
+                                                                <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase border border-emerald-500/20">
+                                                                    Live API • {selectedShipment.shipment.status_source.split(":")[1] || "Provider"}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase border border-blue-500/20">
+                                                                    Email Derived
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
                                                     <div className="flex justify-between">
                                                         <span className="text-neutral-400">Carrier:</span>
                                                         <span className="text-neutral-200 font-semibold">{selectedShipment.shipment.carrier}</span>
@@ -320,11 +334,16 @@ export function DashboardView() {
                                                         <span className="text-neutral-400">Destination:</span>
                                                         <span className="text-neutral-200 font-semibold">{selectedShipment.shipment.destination_port}</span>
                                                     </div>
-                                                    <div className="flex justify-between">
+                                                    <div className="flex justify-between items-center">
                                                         <span className="text-neutral-400">ETA:</span>
-                                                        <span className="text-neutral-200 font-semibold font-mono">
-                                                            {selectedShipment.shipment.eta ? new Date(selectedShipment.shipment.eta).toLocaleDateString() : "Pending"}
-                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-neutral-200 font-semibold font-mono">
+                                                                {selectedShipment.shipment.eta ? new Date(selectedShipment.shipment.eta).toLocaleDateString() : "Pending"}
+                                                            </span>
+                                                            {selectedShipment.snapshots[0]?.eta && (
+                                                                <span className="text-[8px] px-1 bg-white/10 rounded font-bold uppercase text-neutral-400">Carrier Predictive</span>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
 
@@ -332,22 +351,38 @@ export function DashboardView() {
                                                 <div className="space-y-2">
                                                     <h4 className="text-[10px] font-mono text-neutral-400 uppercase tracking-widest font-bold">Latest Snapshot</h4>
                                                     {selectedShipment.snapshots[0] ? (
-                                                        <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 text-[10px]">
-                                                            <div className="flex justify-between">
+                                                        <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 text-[10px] relative overflow-hidden">
+                                                            {/* Freshness Indicator */}
+                                                            {new Date().getTime() - new Date(selectedShipment.snapshots[0].synced_at).getTime() > 24 * 60 * 60 * 1000 ? (
+                                                                <div className="absolute top-0 right-0 left-0 bg-amber-500/20 text-amber-500 text-center text-[8px] font-bold py-0.5 uppercase tracking-widest border-b border-amber-500/20">
+                                                                    Live carrier status temporarily unavailable. Showing latest known TrackFlow data.
+                                                                </div>
+                                                            ) : (
+                                                                <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981] animate-pulse" />
+                                                            )}
+                                                            <div className="pt-2 flex justify-between items-center">
                                                                 <span className="text-neutral-400">Provider:</span>
                                                                 <span className="font-bold text-neutral-200">{selectedShipment.snapshots[0].carrier_adapter}</span>
                                                             </div>
-                                                            <div className="flex justify-between">
+                                                            <div className="flex justify-between items-center">
                                                                 <span className="text-neutral-400">Status:</span>
-                                                                <span className="font-bold text-primary">{selectedShipment.snapshots[0].carrier_status}</span>
+                                                                <span className="font-bold text-primary px-2 py-0.5 bg-primary/10 rounded-md">{selectedShipment.snapshots[0].carrier_status}</span>
                                                             </div>
-                                                            <div className="flex justify-between">
-                                                                <span className="text-neutral-400">Synced At:</span>
-                                                                <span className="font-mono text-neutral-500">{new Date(selectedShipment.snapshots[0].synced_at).toLocaleTimeString()}</span>
+                                                            {selectedShipment.snapshots[0].location && (
+                                                                <div className="flex justify-between">
+                                                                    <span className="text-neutral-400">Location:</span>
+                                                                    <span className="font-semibold text-neutral-300 truncate max-w-[150px]">{selectedShipment.snapshots[0].location}</span>
+                                                                </div>
+                                                            )}
+                                                            <div className="flex justify-between pt-1 border-t border-white/5">
+                                                                <span className="text-neutral-500">Synced At:</span>
+                                                                <span className="font-mono text-neutral-500">{new Date(selectedShipment.snapshots[0].synced_at).toLocaleString()}</span>
                                                             </div>
                                                         </div>
                                                     ) : (
-                                                        <div className="text-xs text-neutral-500 italic">No carrier tracking fetched.</div>
+                                                        <div className="text-xs text-neutral-500 italic p-3 border border-dashed border-white/10 rounded-lg bg-black/20 text-center">
+                                                            No carrier tracking fetched. Data is email-derived only.
+                                                        </div>
                                                     )}
                                                 </div>
 

@@ -261,11 +261,34 @@ export class ApiClient {
     /**
      * Registers a new mailbox directly with an access token (for real sync).
      */
-    static async registerMailbox(payload: { provider_type: string, email: string, access_token: string, refresh_token?: string }): Promise<any> {
+    static async registerMailbox(payload: { provider_type: string, email: string, access_token: string, refresh_token?: string, tenant_id?: string, user_id?: string }): Promise<any> {
         return this.request<any>("/mailboxes/register", {
             method: "POST",
             body: JSON.stringify(payload)
         });
+    }
+
+    static async getTrackingProviders(): Promise<any[]> {
+        return this.request<any[]>("/trackflow/providers");
+    }
+
+    static async connectTrackingProvider(payload: { provider_type: string, credentials: Record<string, string>, region?: string }): Promise<any> {
+        return this.request<any>("/trackflow/providers/connect", {
+            method: "POST",
+            body: JSON.stringify(payload)
+        });
+    }
+
+    static async testTrackingProvider(providerType: string): Promise<any> {
+        return this.request<any>(`/trackflow/providers/${providerType}/test`, { method: "POST" });
+    }
+
+    static async syncTrackingProvider(providerType: string): Promise<any> {
+        return this.request<any>(`/trackflow/providers/${providerType}/sync`, { method: "POST" });
+    }
+
+    static async disconnectTrackingProvider(providerType: string): Promise<any> {
+        return this.request<any>(`/trackflow/providers/${providerType}`, { method: "DELETE" });
     }
 
     /**
